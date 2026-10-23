@@ -1,0 +1,747 @@
+/**
+ * Browser-half tests for @ybbmm/dsh-translation-pane.
+ *
+ * The bundle is a module-loader side effect, so this test supplies a tiny
+ * `window.__ModuleLoader__` and a hook-capable React stand-in, then drives
+ * the real registration and panel code.
+ *
+ * The tests that matter most here are the rendering ones: a select whose
+ * option has no name in the active locale renders a blank entry, and a blank
+ * entry is invisible in the UI but still passes every unit test that only
+ * looks at ids. The panel must therefore never render an unnamed option, in
+ * any locale.
+ */
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+
+const NS = 'ybbmm.dsh-translation-pane'
+/** The preferences key the panel's own `localStorage` document uses. */
+const STORAGE_KEY = 'dsh.translationPane.preferences'
+
+/** The mount whose render is in progress, read by the React stand-in. */
+let currentOwner
+
+/**
+ * Build a minimal React stand-in: createElement plus per-mount state, refs,
+ * memos, callbacks and effects.
+ * @returns the stand-in.
+ */
+function createReact() {
+  const element = (type, props, ...children) => {
+    const merged = { ...(props ?? {}) }
+    if (children.length > 0) merged.children = children.length === 1 ? children[0] : children
+    return { type, props: merged, children: children.flat() }
+  }
+
+  /**
+   * Whether a dependency list changed since the previous render.
+   * @param previous - the recorded dependencies.
+   * @param next - the current dependencies.
+   * @returns whether the list changed.
+   */
+  const changed = (previous, next) => {
+    if (previous === undefined || next === undefined) return true
+    if (previous.length !== next.length) return true
+    return next.some((dep, index) => !Object.is(dep, previous[index]))
+  }
+
+  return {
+    Fragment: 'Fragment',
+    createElement: element,
+    useState(initial) {
+      const owner = currentOwner
+      const index = owner.index
+      owner.index += 1
+      if (!(index in owner.values)) {
+        owner.values[index] = typeof initial === 'function' ? initial() : initial
+      }
+      return [
+        owner.values[index],
+        (next) => {
+          owner.values[index] = typeof next === 'function' ? next(owner.values[index]) : next
+          owner.schedule()
+        },
+      ]
+    },
+    useRef(initial) {
+      const owner = currentOwner
+      const index = owner.index
+      owner.index += 1
+      if (!(index in owner.values)) owner.values[index] = { current: initial }
+      return owner.values[index]
+    },
+    useMemo(factory, deps) {
+      const owner = currentOwner
+      const index = owner.index
+      owner.index += 1
+      const previous = owner.values[index]
+      if (previous === undefined || changed(previous.deps, deps)) {
+        owner.values[index] = { deps: deps === undefined ? undefined : [...deps], value: factory() }
+      }
+      return owner.values[index].value
+    },
+    useCallback(callback, deps) {
+      const owner = currentOwner
+      const index = owner.index
+      owner.index += 1
+      const previous = owner.values[index]
+      if (previous === undefined || changed(previous.deps, deps)) {
+        owner.values[index] = { deps: deps === undefined ? undefined : [...deps], value: callback }
+      }
+      return owner.values[index].value
+    },
+    useEffect(effect, deps) {
+      const owner = currentOwner
+      const index = owner.index
+      owner.index += 1
+      const previous = owner.values[index]
+      const isChanged =
+        previous === undefined ||
+        previous.deps === undefined ||
+        deps === undefined ||
+        changed(previous.deps, deps)
+      owner.values[index] = { deps: deps === undefined ? undefined : [...deps] }
+      // Effects run after the render, exactly like the browser does.
+      if (isChanged) owner.effects.push(effect)
+    },
+  }
+}
+
+let cachedDefinition
+
+/**
+ * Load the bundle once (the module loader fires on the first import only).
+ * @returns the plugin definition plus its React stand-in.
+ */
+async function loadPlugin() {
+  if (cachedDefinition === undefined) {
+    globalThis.window = {
+      __ModuleLoader__: {
+        load: (loaded) => {
+          cachedDefinition = loaded
+        },
+      },
+    }
+    await import('../client.js')
+  }
+  assert.ok(cachedDefinition, 'client.js must register itself with the module loader')
+  const React = createReact()
+  const require = (spec) => {
+    if (spec === 'react') return React
+    throw new Error(`unexpected require: ${spec}`)
+  }
+  return { plugin: cachedDefinition.factory(require), React }
+}
+
+/** The routing facts a current Host reports. */
+const HOST_DESCRIBE = {
+  route: 'direct',
+  providers: ['bing', 'google'],
+  languages: ['auto', 'zh-Hans', 'en'],
+  maxTextChars: 20000,
+  fragmentChars: 3000,
+  maxRetries: 2,
+  rateLimitPerMinute: 60,
+  cacheEntries: 0,
+  cacheHits: 0,
+  cacheMisses: 0,
+  providerHealth: {
+    bing: { unreachable: false },
+    google: { unreachable: false },
+  },
+  failover: true,
+}
+
+/**
+ * Apply the plugin to a fake client context.
+ * @param plugin - the plugin object.
+ * @param locale - the active UI locale.
+ * @param options - `describe`, `translate` and `connectionState` overrides.
+ * @returns the captured registrations, dictionaries and fake services.
+ */
+function applyPlugin(plugin, locale, options = {}) {
+  const dictionaries = {}
+  const registrations = {}
+  const generators = {}
+  const describe = options.describe ?? HOST_DESCRIBE
+  const translate = options.translate ?? (() => ({ text: '' }))
+  const services = {
+    locale: {
+      register: (namespace, dicts) => {
+        dictionaries[namespace] = dicts
+        return () => {}
+      },
+      bind: (namespace) => (key) => dictionaries[namespace]?.[locale]?.[key] ?? key,
+      getLocale: () => ({ active: locale }),
+      subscribe: () => () => {},
+    },
+    connection: {
+      state: { getSnapshot: () => options.connectionState ?? 'connected' },
+      rpc: {
+        call: (_channel, endpoint, payload) => {
+          if (endpoint === 'translationPane/describe') {
+            return Promise.resolve({ ok: true, value: describe })
+          }
+          if (endpoint === 'translationPane/translate') {
+            const value = translate(payload?.args)
+            // A test may return a whole RPC result to simulate a Host failure.
+            if (value !== null && typeof value === 'object' && typeof value.ok === 'boolean') {
+              return Promise.resolve(value)
+            }
+            return Promise.resolve({ ok: true, value })
+          }
+          return Promise.resolve({ ok: true, value: {} })
+        },
+      },
+    },
+  }
+  const ctx = {
+    effect: (setup) => setup(),
+    locale: services.locale,
+    slots: {
+      inject: (name, generator) => {
+        generators[name] = generator
+      },
+      register: (spec, component) => {
+        registrations[spec.name] = { spec, component }
+        return () => {}
+      },
+    },
+    get: (name) => services[name],
+  }
+  plugin.apply(ctx)
+  for (const [name, generator] of Object.entries(generators)) {
+    // A slot callback may be a plain function or a generator function; the
+    // registration happens either way.
+    const produced = generator()
+    if (typeof produced?.next === 'function') {
+      const step = produced.next()
+      assert.equal(step.done, false, `${name} must yield its slot registration`)
+    }
+  }
+  return { registrations, dictionaries, services }
+}
+
+/**
+ * Mount one component function; `tree` reflects the latest render.
+ *
+ * The tree is expanded: a child that is itself a component is rendered in
+ * place, so the test sees the real `<select>` and `<option>` elements rather
+ * than the component elements that produce them.
+ * @param Component - the function component.
+ * @param props - its props.
+ * @returns the mount handle.
+ */
+function mount(Component, props) {
+  const owner = { index: 0, values: [], tree: undefined, scheduled: false, effects: [] }
+
+  /**
+   * Replace every component element with the tree it renders.
+   * @param node - the node to expand.
+   * @returns the expanded node.
+   */
+  const expand = (node) => {
+    if (node === null || node === undefined || typeof node !== 'object') return node
+    if (Array.isArray(node)) return node.map(expand)
+    if (typeof node.type === 'function') {
+      const previous = currentOwner
+      currentOwner = owner
+      try {
+        return expand(node.type(node.props))
+      } finally {
+        currentOwner = previous
+      }
+    }
+    return { ...node, children: (node.children ?? []).map(expand) }
+  }
+
+  const draw = () => {
+    owner.index = 0
+    owner.effects = []
+    const previous = currentOwner
+    currentOwner = owner
+    try {
+      owner.tree = expand(Component(props))
+    } finally {
+      currentOwner = previous
+    }
+    const effects = owner.effects
+    owner.effects = []
+    for (const effect of effects) effect()
+  }
+  owner.schedule = () => {
+    if (owner.scheduled) return
+    owner.scheduled = true
+    queueMicrotask(() => {
+      owner.scheduled = false
+      draw()
+    })
+  }
+  draw()
+  return owner
+}
+
+/**
+ * Collect every element of a tree that satisfies a predicate.
+ * @param node - the tree or a subtree.
+ * @param predicate - the test each element must pass.
+ * @returns the matching elements.
+ */
+function findAll(node, predicate) {
+  if (node === null || node === undefined || typeof node !== 'object') return []
+  if (Array.isArray(node)) return node.flatMap((child) => findAll(child, predicate))
+  const found = predicate(node) ? [node] : []
+  return found.concat(findAll(node.children ?? [], predicate))
+}
+
+/**
+ * The text a node renders.
+ * @param node - the node.
+ * @returns the concatenated text.
+ */
+function textOf(node) {
+  if (node === null || node === undefined || typeof node === 'boolean') return ''
+  if (typeof node === 'string' || typeof node === 'number') return String(node)
+  if (Array.isArray(node)) return node.map(textOf).join('')
+  return textOf(node.children ?? [])
+}
+
+/**
+ * Render the panel in one locale and return its selects.
+ * @param locale - the active UI locale.
+ * @param options - `describe`, `translate` and `connectionState` overrides.
+ * @returns the rendered selects.
+ */
+function renderPanel(locale, options = {}) {
+  const rendered = mountPanel({ ...options, locale })
+  return findAll(rendered.mounted.tree, (node) => node.type === 'select')
+}
+
+/**
+ * Mount the page component with a real locale-bound `t`.
+ * @param options - `locale`, `describe`, `translate` and `connectionState`.
+ * @returns the mount handle plus the bound translator.
+ */
+function mountPanel(options = {}) {
+  const locale = options.locale ?? 'en'
+  const { plugin } = loadPluginState
+  const { registrations, dictionaries } = applyPlugin(plugin, locale, options)
+  const table = dictionaries[NS][locale]
+  const t = (key, params) => {
+    const template = table[key] ?? key
+    if (!params) return template
+    return template.replace(/\{(\w+)\}/g, (match, name) =>
+      name in params ? String(params[name]) : match,
+    )
+  }
+  // The `main` slot owns the page component, which renders the panel.
+  const page = registrations['main'].component
+  return { mounted: mount(page, { t }), t, locale }
+}
+
+/**
+ * Let every queued promise, effect and redraw settle.
+ * @returns resolution once the panel is idle.
+ */
+async function flushPanel() {
+  for (let index = 0; index < 5; index += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+}
+
+/**
+ * Find one rendered node, failing the test when it is absent.
+ * @param tree - the rendered tree.
+ * @param predicate - the test the element must pass.
+ * @param label - what is being looked for, for the assertion message.
+ * @returns the matching element.
+ */
+function findOne(tree, predicate, label) {
+  const found = findAll(tree, predicate)
+  assert.ok(found.length > 0, `the panel must render ${label}`)
+  return found[0]
+}
+
+/** The primary Translate button. */
+function translateButton(tree) {
+  return findOne(
+    tree,
+    (node) =>
+      node.type === 'button' &&
+      String(node.props?.className).split(' ').includes('dshTr-button') &&
+      !String(node.props?.className).includes('buttonGhost'),
+    'the Translate button',
+  )
+}
+
+/** The source textarea. */
+function sourceArea(tree) {
+  return findOne(tree, (node) => node.type === 'textarea', 'the source editor')
+}
+
+/**
+ * Type into the source editor and let the panel redraw.
+ * @param mounted - the mount handle.
+ * @param text - the new source text.
+ * @returns resolution once the redraw settled.
+ */
+async function typeSource(mounted, text) {
+  sourceArea(mounted.tree).props.onChange({ target: { value: text } })
+  await flushPanel()
+}
+
+/**
+ * Run one block with a fake `localStorage`, restoring the global afterwards.
+ * @param preferences - the saved preferences object.
+ * @param run - the block to run.
+ * @returns the block's result.
+ */
+async function withPreferences(preferences, run) {
+  const previous = globalThis.localStorage
+  const store = new Map([[STORAGE_KEY, JSON.stringify(preferences)]])
+  globalThis.localStorage = {
+    getItem: (key) => store.get(key) ?? null,
+    setItem: (key, value) => {
+      store.set(key, value)
+    },
+  }
+  try {
+    return await run()
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage
+    else globalThis.localStorage = previous
+  }
+}
+
+/** The loaded plugin, shared by every test. */
+let loadPluginState
+
+test('the bundle registers its sidebar entry and its main panel', async () => {
+  loadPluginState = await loadPlugin()
+  const { registrations } = applyPlugin(loadPluginState.plugin, 'en')
+  assert.ok(registrations['sidebar.panellist'], 'the sidebar entry must be registered')
+  assert.equal(registrations['sidebar.panellist'].spec.id, 'translation-pane')
+  assert.ok(registrations['main'], 'the main panel must be registered')
+  assert.equal(registrations['main'].spec.key, 'translation-pane')
+})
+
+test('every option of every select has a name in the Chinese UI', async () => {
+  loadPluginState = await loadPlugin()
+  const selects = renderPanel('zh')
+  assert.ok(selects.length >= 3, 'the panel has a source, a target and a service select')
+  for (const select of selects) {
+    const options = findAll(select.children, (node) => node.type === 'option')
+    assert.ok(options.length > 0, 'a select must offer at least one option')
+    for (const option of options) {
+      const text = textOf(option)
+      assert.equal(
+        text.trim().length > 0,
+        true,
+        `an option rendered blank (value ${String(option.props?.value)})`,
+      )
+    }
+  }
+})
+
+test('every option of every select has a name in the English UI', async () => {
+  loadPluginState = await loadPlugin()
+  const selects = renderPanel('en')
+  for (const select of selects) {
+    const options = findAll(select.children, (node) => node.type === 'option')
+    for (const option of options) {
+      assert.equal(
+        textOf(option).trim().length > 0,
+        true,
+        `an option rendered blank (value ${String(option.props?.value)})`,
+      )
+    }
+  }
+})
+
+test('the service select names the services in the active locale', async () => {
+  loadPluginState = await loadPlugin()
+  const chinese = renderPanel('zh')
+  const service = chinese.find((select) => select.props?.id?.endsWith('-service'))
+  assert.ok(service, 'the service select must be rendered')
+  const names = findAll(service.children, (node) => node.type === 'option').map(textOf)
+  assert.deepEqual(names, ['必应'])
+
+  const english = renderPanel('en')
+  const englishService = english.find((select) => select.props?.id?.endsWith('-service'))
+  const englishNames = findAll(englishService.children, (node) => node.type === 'option').map(textOf)
+  assert.deepEqual(englishNames, ['Bing'])
+})
+
+test('both dictionaries carry exactly the same keys', async () => {
+  loadPluginState = await loadPlugin()
+  const { dictionaries } = applyPlugin(loadPluginState.plugin, 'en')
+  const en = Object.keys(dictionaries[NS].en).sort()
+  const zh = Object.keys(dictionaries[NS].zh).sort()
+  assert.deepEqual(en, zh, 'the two dictionaries must stay in step')
+  assert.ok(en.length > 20, 'the panel needs a full dictionary')
+})
+
+test('the panel exposes its constraints and text direction to assistive technology', async () => {
+  loadPluginState = await loadPlugin()
+  const { mounted } = mountPanel()
+  await flushPanel()
+
+  const editor = sourceArea(mounted.tree)
+  const counter = findOne(
+    mounted.tree,
+    (node) => node.type === 'span' && String(node.props?.id).endsWith('-counter'),
+    'the character counter',
+  )
+  const hint = findOne(
+    mounted.tree,
+    (node) => node.type === 'span' && String(node.props?.id).endsWith('-hint'),
+    'the keyboard hint',
+  )
+  const describedBy = String(translateButton(mounted.tree).props['aria-describedby']).split(' ')
+  assert.ok(describedBy.includes(counter.props.id), 'the action must describe its character counter')
+  assert.ok(describedBy.includes(hint.props.id), 'the action must describe its shortcut hint')
+  assert.equal(editor.props.dir, 'auto', 'the source editor must follow its content direction')
+  assert.equal(editor.props['aria-invalid'], undefined)
+
+  const region = findOne(mounted.tree, (node) => node.props?.role === 'region', 'the result region')
+  assert.equal(region.props.dir, 'auto', 'the result must follow its content direction')
+  assert.equal(region.props['aria-atomic'], 'true')
+  assert.equal(region.props['aria-live'], 'polite')
+  assert.equal(region.props.tabIndex, 0)
+  // A Host that predates providerHealth must render without a notice.
+  assert.equal(findAll(mounted.tree, (node) => node.props?.className === 'dshTr-notice').length, 0)
+})
+
+test('an over-limit source is marked invalid and cannot be translated', async () => {
+  loadPluginState = await loadPlugin()
+  const { mounted } = mountPanel({ describe: { ...HOST_DESCRIBE, maxTextChars: 5 } })
+  await flushPanel()
+  await typeSource(mounted, 'abcdef')
+
+  assert.equal(sourceArea(mounted.tree).props['aria-invalid'], 'true')
+  assert.equal(translateButton(mounted.tree).props.disabled, true)
+  const counter = findOne(
+    mounted.tree,
+    (node) => node.type === 'span' && String(node.props?.id).endsWith('-counter'),
+    'the character counter',
+  )
+  assert.match(textOf(counter), /Too long by 1 characters/)
+  const status = findOne(
+    mounted.tree,
+    (node) => node.props?.className === 'dshTr-status',
+    'the status pill',
+  )
+  assert.equal(textOf(status), 'Too long')
+
+  // Shortening the text clears the invalid state and enables the action.
+  await typeSource(mounted, 'abc')
+  assert.equal(sourceArea(mounted.tree).props['aria-invalid'], undefined)
+  assert.equal(translateButton(mounted.tree).props.disabled, false)
+})
+
+test('a running translation disables translating and can be cancelled', async () => {
+  loadPluginState = await loadPlugin()
+  const { mounted } = mountPanel({ translate: () => new Promise(() => {}) })
+  await flushPanel()
+  await typeSource(mounted, 'hello')
+  translateButton(mounted.tree).props.onClick()
+  await flushPanel()
+
+  assert.equal(translateButton(mounted.tree).props.disabled, true)
+  assert.equal(textOf(translateButton(mounted.tree)), 'Translating…')
+  const cancel = findOne(
+    mounted.tree,
+    (node) => node.type === 'button' && String(node.props?.className).includes('buttonGhost'),
+    'the Cancel button',
+  )
+  cancel.props.onClick()
+  await flushPanel()
+
+  const status = findOne(
+    mounted.tree,
+    (node) => node.props?.className === 'dshTr-status',
+    'the status pill',
+  )
+  assert.equal(textOf(status), 'Cancelled')
+  assert.equal(translateButton(mounted.tree).props.disabled, false)
+})
+
+test('a failover result names the served service in a status notice', async () => {
+  loadPluginState = await loadPlugin()
+  await withPreferences({ provider: 'google' }, async () => {
+    const { mounted } = mountPanel({
+      translate: () => ({
+        text: '你好',
+        provider: 'bing',
+        requestedProvider: 'google',
+        failover: true,
+        cached: false,
+        durationMs: 4,
+      }),
+    })
+    await flushPanel()
+    await typeSource(mounted, 'hello')
+    translateButton(mounted.tree).props.onClick()
+    await flushPanel()
+
+    const notice = findOne(
+      mounted.tree,
+      (node) => node.props?.className === 'dshTr-notice',
+      'the failover notice',
+    )
+    assert.equal(notice.props.role, 'status')
+    assert.match(
+      textOf(notice),
+      /The Google service could not answer, so the Host translated with Bing\./,
+    )
+    const region = findOne(mounted.tree, (node) => node.props?.role === 'region', 'the result region')
+    assert.equal(textOf(region), '你好')
+  })
+})
+
+test('the failover notice is localized in Chinese', async () => {
+  loadPluginState = await loadPlugin()
+  await withPreferences({ provider: 'google' }, async () => {
+    const { mounted } = mountPanel({
+      locale: 'zh',
+      translate: () => ({
+        text: '你好',
+        provider: 'bing',
+        requestedProvider: 'google',
+        failover: true,
+        cached: false,
+        durationMs: 4,
+      }),
+    })
+    await flushPanel()
+    await typeSource(mounted, 'hello')
+    translateButton(mounted.tree).props.onClick()
+    await flushPanel()
+
+    const notice = findOne(
+      mounted.tree,
+      (node) => node.props?.className === 'dshTr-notice',
+      'the failover notice',
+    )
+    assert.match(textOf(notice), /Host 已改用 必应 完成。/)
+  })
+})
+
+test('a mixed-provider answer names every service that answered', async () => {
+  loadPluginState = await loadPlugin()
+  await withPreferences({ provider: 'google' }, async () => {
+    const { mounted } = mountPanel({
+      translate: () => ({
+        text: '你好世界',
+        provider: 'google',
+        requestedProvider: 'google',
+        // Fragment one was answered by Google, fragment two failed over to Bing.
+        providersServed: ['google', 'bing'],
+        failover: true,
+        cached: false,
+        durationMs: 42,
+      }),
+    })
+    await flushPanel()
+    await typeSource(mounted, 'hello world')
+    translateButton(mounted.tree).props.onClick()
+    await flushPanel()
+
+    const notice = findOne(
+      mounted.tree,
+      (node) => node.props?.className === 'dshTr-notice',
+      'the mixed-provider notice',
+    )
+    assert.match(textOf(notice), /More than one service answered this text \(Google \+ Bing\)\./)
+    // The single-service failover copy would name Google twice, so it must not
+    // be what the panel shows.
+    assert.doesNotMatch(textOf(notice), /could not answer/)
+
+    const meta = findOne(
+      mounted.tree,
+      (node) => node.props?.className === 'dshTr-meta',
+      'the meta line',
+    )
+    assert.match(textOf(meta), /Service: Google \+ Bing/)
+  })
+})
+
+test('a provider the Host reports unreachable is flagged before translating', async () => {
+  loadPluginState = await loadPlugin()
+  await withPreferences({ provider: 'google' }, async () => {
+    const { mounted } = mountPanel({
+      describe: {
+        ...HOST_DESCRIBE,
+        providerHealth: {
+          bing: { unreachable: false },
+          google: { unreachable: true, reason: 'translation-pane/provider-unreachable', until: '2026-01-01T00:00:00.000Z' },
+        },
+      },
+    })
+    await flushPanel()
+    const notice = findOne(
+      mounted.tree,
+      (node) => node.props?.className === 'dshTr-notice',
+      'the provider health notice',
+    )
+    assert.match(
+      textOf(notice),
+      /The Google service is unavailable right now; translations will automatically use the other service\./,
+    )
+
+    // Choosing the healthy service clears the notice.
+    const service = findOne(
+      mounted.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith('-service'),
+      'the service select',
+    )
+    service.props.onChange({ target: { value: 'bing' } })
+    await flushPanel()
+    assert.equal(findAll(mounted.tree, (node) => node.props?.className === 'dshTr-notice').length, 0)
+  })
+})
+
+test('a health warning is not shown when the Host cannot fail over', async () => {
+  loadPluginState = await loadPlugin()
+  await withPreferences({ provider: 'google' }, async () => {
+    const { mounted } = mountPanel({
+      describe: {
+        ...HOST_DESCRIBE,
+        failover: false,
+        providerHealth: {
+          bing: { unreachable: false },
+          google: { unreachable: true, reason: 'translation-pane/provider-unreachable' },
+        },
+      },
+    })
+    await flushPanel()
+    // The notice promises an automatic switch, which this Host cannot make.
+    assert.equal(findAll(mounted.tree, (node) => node.props?.className === 'dshTr-notice').length, 0)
+  })
+})
+
+test('the provider-unreachable failure is distinct from the carrier failure', async () => {
+  loadPluginState = await loadPlugin()
+  const failing = (code) => ({
+    ok: false,
+    error: { code, message: 'a Host diagnostic', details: { provider: 'google' } },
+  })
+  for (const [code, expected] of [
+    [
+      'translation-pane/provider-unreachable',
+      'The Host could not reach the translation service. Try again, or choose another service.',
+    ],
+    [
+      'translation-pane/offline',
+      'The Harness cannot reach its Host. Check that the Host is running, then try again.',
+    ],
+  ]) {
+    const { mounted } = mountPanel({ translate: () => failing(code) })
+    await flushPanel()
+    await typeSource(mounted, 'hello')
+    translateButton(mounted.tree).props.onClick()
+    await flushPanel()
+    const alert = findOne(mounted.tree, (node) => node.props?.role === 'alert', 'the error alert')
+    assert.equal(textOf(alert), expected, `${code} must map onto its own copy`)
+  }
+})

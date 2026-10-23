@@ -1,0 +1,67 @@
+{
+  "name": "@ybbmm/dsh-translation-pane",
+  "version": "1.2.0",
+  "type": "module",
+  "description": "Translation workbench for DeepSeek Harness: a sidebar panel that translates text through Bing or Google with retries, caching, rate limiting and automatic provider failover, plus a translate_text tool for the agent. | DeepSeek Harness 翻译插件：侧边栏翻译面板，支持 Bing / Google，带重试、缓存、限流与自动服务降级，并为智能体提供 translate_text 工具。",
+  "license": "MIT",
+  "author": "jack-001-a",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jack-001-a/deepseek-harness-translation-pane.git"
+  },
+  "homepage": "https://github.com/jack-001-a/deepseek-harness-translation-pane#readme",
+  "bugs": {
+    "url": "https://github.com/jack-001-a/deepseek-harness-translation-pane/issues"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "dsh",
+    "translation",
+    "translate",
+    "machine-translation",
+    "i18n",
+    "panel",
+    "failover"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  }
+}

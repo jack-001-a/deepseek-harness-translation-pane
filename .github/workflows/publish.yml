@@ -1,0 +1,62 @@
+name: publish
+
+# Publishes through npm Trusted Publishing (OIDC): no long-lived token, no
+# one-time password. The trusted publisher is bound to this exact workflow
+# filename and repository, so neither may be renamed without reconfiguring it.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  # Required for the OIDC identity GitHub exchanges with npm.
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Verify the package manifest
+        run: |
+          node -e "const p=require('./package.json'); if (p.private) throw new Error('package.json must not be private'); if (!p.repository?.url) throw new Error('repository.url is required for trusted publishing'); console.log(p.name, p.version)"
+
+      - name: Run the test suite
+        run: npm test
+
+      - name: Inspect the tarball contents
+        run: npm pack --dry-run
+
+      # A release is often published twice on purpose: once from a workstation
+      # that already holds the registry token, and once from the tag that
+      # records it. npm refuses to publish a version that exists, so the
+      # second attempt must skip rather than fail the release.
+      - name: Check whether the version is already published
+        id: published
+        run: |
+          package="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          if npm view "${package}@${version}" version >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "${package}@${version} is already on the registry; nothing to publish"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "${package}@${version} is not on the registry yet"
+          fi
+
+      - name: Publish
+        if: steps.published.outputs.exists == 'false'
+        run: npm publish
+
+      - name: Confirm the published version
+        if: steps.published.outputs.exists == 'false'
+        run: npm view "$(node -p "require('./package.json').name")" version

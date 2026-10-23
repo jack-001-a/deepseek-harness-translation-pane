@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Translation Pane",
+    "description": "A sidebar translation workbench that turns text between languages with Bing or Google, plus a translate_text tool for the agent."
+  }
+}

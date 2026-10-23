@@ -1,0 +1,52 @@
+# Loader patch for the @ybbmm/dsh-translation-pane bundle.
+#
+# The file must be a top-level YAML ARRAY of loader patch entries, so the
+# `insert` block below is a list item, not a mapping at the root.
+#
+# Every key under `config` is optional: the Host falls back to the documented
+# default when a key is absent or invalid, so a partial override is safe.
+# Copy the block into your profile's `cordis.patch.yml` to change the tunables.
+- insert:
+    - id: ybbmm-dsh-translation-pane
+      name: '@ybbmm/dsh-translation-pane'
+      config:
+        # Anonymous provider endpoints used when the host does not mount its own
+        # `translator` service. Both accept only HTTP(S) URLs without
+        # credentials or a fragment.
+        bingEndpoint: https://edge.microsoft.com/translate/translatetext
+        googleEndpoint: https://translate.googleapis.com/translate_a/single
+        # Complete-request deadline for one request, fragments included.
+        timeoutMs: 20000
+        # How long one provider may take to start answering (response headers)
+        # before the other provider is tried. Capped by `timeoutMs`.
+        attemptTimeoutMs: 3000
+        # How long a provider that failed a provider-level fault is avoided.
+        # Later requests go straight to the healthy provider, and the failed
+        # one is retried automatically once this window expires. Set to 0 to
+        # disable the observation window.
+        providerCooldownMs: 300000
+        # Automatic failover to the other direct provider (one hop per
+        # fragment). With it disabled, the direct route behaves like a
+        # single-provider route and uses `maxRetries` instead.
+        failover: true
+        # Largest input accepted for one request, in UTF-16 code units. Longer
+        # input is split into `fragmentChars`-sized provider requests.
+        maxTextChars: 20000
+        # Provider-sized fragment length.
+        fragmentChars: 3000
+        # Retries for transient failures only (network errors, HTTP 429, HTTP 5xx).
+        # Used when a second provider is not available; with `failover: true`
+        # both providers are tried once instead of retrying one of them.
+        maxRetries: 2
+        # First back-off delay, and its ceiling.
+        retryBaseMs: 250
+        retryMaxMs: 4000
+        # Largest provider response accepted, in bytes.
+        maxResponseBytes: 1048576
+        # Bounded LRU of finished translations, keyed by provider, language pair
+        # and source text. Set to 0 to disable caching.
+        cacheSize: 64
+        # Token bucket: provider requests allowed per minute across all callers.
+        rateLimitPerMinute: 60
+        # Fragments of one long request dispatched at the same time.
+        maxConcurrency: 3
