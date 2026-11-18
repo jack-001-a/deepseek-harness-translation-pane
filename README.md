@@ -89,6 +89,9 @@ Host therefore:
   one provider call.
 - **cancels** cleanly: the agent tool's cancellation signal and the service's
   own lifetime both abort an in-flight request.
+- **invalidates on edits.** Changing the source while a translation is running
+  aborts that request, clears the previous result and ignores any late
+  response, so an answer cannot appear beside text that was not submitted.
 
 Fragments of one long document are dispatched with bounded concurrency rather
 than one at a time, so a large input is not many times slower than it needs to
@@ -264,9 +267,6 @@ The tests run against the real module with a fake Cordis context and a stubbed
 - A provider's observed health is in-memory and per service instance. A restart
   forgets it, and the first request after a provider becomes unreachable pays
   one bounded attempt (`attemptTimeoutMs`) before the failover answers.
-- Editing the source text while a translation is in flight does not cancel it;
-  the answer that arrives belongs to the text that was submitted, and can look
-  stale next to the newer input. Cancel or translate again to replace it.
 - UI copy is English and Simplified Chinese only; the language dropdown labels
   follow the active UI locale through the same two-language choice.
 - Machine translation can alter Markdown or code examples. The source text is

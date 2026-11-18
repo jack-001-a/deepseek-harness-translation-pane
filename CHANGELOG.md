@@ -4,6 +4,15 @@ All notable changes to `@ybbmm/dsh-translation-pane` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Fixed
+
+- Editing the source during a translation now aborts the in-flight request,
+  clears the result associated with the previous text, and ignores late
+  responses. A stale translation can no longer appear beside newly edited
+  source text.
+
 ## [1.2.0] — 2026-10-23
 
 ### Added
