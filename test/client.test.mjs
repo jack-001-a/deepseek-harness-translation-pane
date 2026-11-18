@@ -178,17 +178,18 @@ function applyPlugin(plugin, locale, options = {}) {
     connection: {
       state: { getSnapshot: () => options.connectionState ?? 'connected' },
       rpc: {
-        call: (_channel, endpoint, payload) => {
+        call: (_channel, endpoint, payload, signal) => {
           if (endpoint === 'translationPane/describe') {
             return Promise.resolve({ ok: true, value: describe })
           }
           if (endpoint === 'translationPane/translate') {
-            const value = translate(payload?.args)
-            // A test may return a whole RPC result to simulate a Host failure.
-            if (value !== null && typeof value === 'object' && typeof value.ok === 'boolean') {
-              return Promise.resolve(value)
-            }
-            return Promise.resolve({ ok: true, value })
+            return Promise.resolve(translate(payload?.args, signal)).then((value) => {
+              // A test may return a whole RPC result to simulate a Host failure.
+              if (value !== null && typeof value === 'object' && typeof value.ok === 'boolean') {
+                return value
+              }
+              return { ok: true, value }
+            })
           }
           return Promise.resolve({ ok: true, value: {} })
         },
@@ -566,6 +567,46 @@ test('a running translation disables translating and can be cancelled', async ()
   assert.equal(translateButton(mounted.tree).props.disabled, false)
 })
 
+test('editing the source cancels the request and ignores its late result', async () => {
+  loadPluginState = await loadPlugin()
+  let resolveTranslation
+  let requestSignal
+  const { mounted } = mountPanel({
+    translate: (_args, signal) => {
+      requestSignal = signal
+      return new Promise((resolve) => {
+        resolveTranslation = resolve
+      })
+    },
+  })
+  await flushPanel()
+  await typeSource(mounted, 'first source')
+  translateButton(mounted.tree).props.onClick()
+  await flushPanel()
+
+  assert.ok(requestSignal, 'the Host request must receive an AbortSignal')
+  assert.equal(requestSignal.aborted, false)
+  await typeSource(mounted, 'updated source')
+  assert.equal(requestSignal.aborted, true, 'editing must abort the submitted request')
+
+  resolveTranslation({
+    text: 'stale translation',
+    provider: 'bing',
+    requestedProvider: 'bing',
+    failover: false,
+  })
+  await flushPanel()
+
+  const region = findOne(mounted.tree, (node) => node.props?.role === 'region', 'the result region')
+  assert.equal(textOf(region).includes('stale translation'), false)
+  assert.equal(translateButton(mounted.tree).props.disabled, false)
+  const status = findOne(
+    mounted.tree,
+    (node) => node.props?.className === 'dshTr-status',
+    'the status pill',
+  )
+  assert.equal(textOf(status), 'Ready')
+})
 test('a failover result names the served service in a status notice', async () => {
   loadPluginState = await loadPlugin()
   await withPreferences({ provider: 'google' }, async () => {

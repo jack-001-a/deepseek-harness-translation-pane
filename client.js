@@ -1198,8 +1198,14 @@ window.__ModuleLoader__.load({
               // screen reader must hear that the text cannot be sent.
               'aria-invalid': overLimit ? 'true' : undefined,
               onChange: (event) => {
+                // Editing the submitted text invalidates its response. Abort
+                // the Host request and clear the previous answer so it cannot
+                // appear beside text that was never translated.
+                if (pending) cancel()
                 setSource(event.target.value)
-                // A stale failure must not follow the user into new text.
+                setOutput('')
+                setResult(null)
+                setCopied(false)
                 setError(null)
                 setErrorTitle(null)
                 setStatus('idle')
