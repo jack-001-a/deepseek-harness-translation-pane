@@ -1343,3 +1343,107 @@ test('splitter: mixed-language and RTL text remains lossless around markup', () 
     assert.ok(fragment.length <= 48)
   }
 })
+
+test('JSON mode translates only string values and preserves the original document layout', async (t) => {
+  const requests = []
+  mockFetch(async (_url, init) => {
+    const source = JSON.parse(init.body)[0]
+    requests.push(source)
+    return jsonResponse(bingPayload(`translated:${source}`))
+  }, t)
+
+  const h = harness()
+  const source = '{\n  "message": "hello",\n  "nested": { "label": "world", "count": 2, "enabled": true, "empty": "" },\n  "items": ["one", null, 3, {"name": "Ada"}]\n}'
+  const result = await h.service.translate({
+    text: source,
+    targetLanguage: 'zh-Hans',
+    format: 'json',
+  })
+
+  const expected = '{\n  "message": "translated:hello",\n  "nested": { "label": "translated:world", "count": 2, "enabled": true, "empty": "" },\n  "items": ["translated:one", null, 3, {"name": "translated:Ada"}]\n}'
+  assert.equal(result.text, expected)
+  assert.deepEqual(JSON.parse(result.text), {
+    message: 'translated:hello',
+    nested: { label: 'translated:world', count: 2, enabled: true, empty: '' },
+    items: ['translated:one', null, 3, { name: 'translated:Ada' }],
+  })
+  assert.deepEqual(requests, ['hello', 'world', 'one', 'Ada'])
+})
+
+test('JSON mode rejects malformed JSON before contacting a provider', async (t) => {
+  let calls = 0
+  mockFetch(async () => {
+    calls += 1
+    return jsonResponse(bingPayload('unexpected'))
+  }, t)
+  const h = harness()
+
+  await assert.rejects(
+    h.service.translate({ text: '{"label": "unterminated}', targetLanguage: 'zh-Hans', format: 'json' }),
+    (error) => error.code === 'translation-pane/invalid-request',
+  )
+  assert.equal(calls, 0)
+})
+
+test('JSON mode splits long string values and rejoins them without changing JSON structure', async (t) => {
+  const bodies = []
+  mockFetch(async (_url, init) => {
+    const fragment = JSON.parse(init.body)[0]
+    bodies.push(fragment)
+    return jsonResponse(bingPayload(fragment.toUpperCase()))
+  }, t)
+  const h = harness({ config: { fragmentChars: 100 } })
+  const value = 'a'.repeat(60) + '\n\n' + 'b'.repeat(60)
+  const source = `{"keep":42,"text":${JSON.stringify(value)},"flag":false}`
+  const result = await h.service.translate({ text: source, targetLanguage: 'zh-Hans', format: 'json' })
+
+  assert.equal(bodies.length, 2)
+  assert.equal(bodies.join(''), value)
+  assert.deepEqual(JSON.parse(result.text), { keep: 42, text: value.toUpperCase(), flag: false })
+})
+
+test('JSON mode leaves documents without string values unchanged and makes no provider request', async (t) => {
+  let calls = 0
+  mockFetch(async () => {
+    calls += 1
+    return jsonResponse(bingPayload('unexpected'))
+  }, t)
+  const h = harness()
+  const source = '{ "count": 1, "enabled": false, "value": null, "items": [2, true] }'
+  const result = await h.service.translate({ text: source, targetLanguage: 'zh-Hans', format: 'json' })
+
+  assert.equal(result.text, source)
+  assert.equal(result.provider, 'none')
+  assert.equal(calls, 0)
+})
+
+test('format is part of the cache key and defaults to text', async (t) => {
+  const bodies = []
+  mockFetch(async (_url, init) => {
+    const fragment = JSON.parse(init.body)[0]
+    bodies.push(fragment)
+    return jsonResponse(bingPayload(`T:${fragment}`))
+  }, t)
+  const h = harness()
+  const source = '{"label":"hello"}'
+
+  const textResult = await h.service.translate({ text: source, targetLanguage: 'zh-Hans' })
+  const jsonResult = await h.service.translate({ text: source, targetLanguage: 'zh-Hans', format: 'json' })
+
+  assert.equal(textResult.text, `T:${source}`)
+  assert.equal(jsonResult.text, '{"label":"T:hello"}')
+  assert.deepEqual(bodies, [source, 'hello'])
+})
+
+test('translate_text agent tool exposes and forwards JSON format', async (t) => {
+  mockFetch(async (_url, init) => jsonResponse(bingPayload(`T:${JSON.parse(init.body)[0]}`)), t)
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+
+  assert.deepEqual(tool.parameters.properties.format.enum, ['text', 'json'])
+  const result = await tool.execute(
+    { text: '{"message":"hello"}', targetLanguage: 'zh-Hans', format: 'json' },
+    { signal: new AbortController().signal },
+  )
+  assert.equal(result.text, '{"message":"T:hello"}')
+})

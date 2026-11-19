@@ -201,6 +201,7 @@ test('the browser payload shape passes the Gateway argument check', () => {
     sourceLanguage: 'auto',
     targetLanguage: 'zh-Hans',
     provider: 'bing',
+    format: 'json',
   }
   assert.doesNotThrow(() => assertExactArguments(payload, descriptor, 'translationPane/translate'))
 })
