@@ -213,16 +213,10 @@ export function providerLanguage(tag, provider) {
 }
 
 /**
- * Split text into request-sized pieces on paragraph, then line, then sentence,
- * then word boundaries.
- *
- * The separator always stays with the fragment it closes, so concatenating
- * the fragments reproduces the source exactly: a translated document keeps
- * the structure of the original instead of losing the breaks between its
- * sentences.
- * @param text - source text.
- * @param maxChars - per-fragment limit in UTF-16 code units.
- * @returns the fragments in source order.
+ * Find syntax tokens that should not be divided between provider requests.
+ * Tokens larger than the request limit are deliberately left splittable.
+ * @param text - complete source text.
+ * @returns sorted, non-overlapping source ranges.
  */
 function protectedTextRanges(text) {
   const patterns = [
