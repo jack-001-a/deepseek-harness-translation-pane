@@ -104,10 +104,46 @@ sentence, then word boundaries before dispatch, and the fragments are rejoined
 so the result matches the source structure exactly. Text beyond the limit is
 refused with a readable message instead of being truncated silently.
 
-### Privacy
+### Privacy and third-party data handling
 
-The Host never logs conversation content. Log records carry lengths, ids and
-counters only.
+The plugin does not make translation local. Unless the shipped Harness
+translator is selected and configured to use a different provider, the direct
+route sends the source text to the selected anonymous Microsoft Edge/Bing or
+Google Translate endpoint. The provider that serves a fragment may differ from
+the requested provider when failover is enabled. A long document can be sent
+as several fragment requests, and a single document can be served by both
+providers.
+
+- **What leaves the Host.** The source text, source-language hint (when
+  supplied), target language and protocol metadata required by the selected
+  endpoint. Do not submit secrets, credentials, personal data or confidential
+  source code unless the user is authorized to disclose them to that provider.
+- **Who receives it.** Microsoft receives requests routed to the Edge/Bing
+  endpoint; Google receives requests routed to Google Translate. The
+  `ctx.translator` route follows the provider and account configuration of
+  the Harness translator service. The plugin cannot verify or guarantee the
+  providers' retention, review, training or processing policies; anonymous
+  requests are not a promise of zero logging or zero retention.
+- **Failover.** With the direct route and `failover: true`, a provider-level
+  failure can cause the same fragment to be sent to the other provider. The
+  result reports `provider`, `requestedProvider`, `failover` and, for
+  mixed-provider long documents, `providersServed`.
+- **Local storage.** Completed translations may be kept in the bounded in-memory
+  LRU cache for the lifetime of this Host service. The cache is not a durable
+  translation history and is discarded when the service unloads or restarts.
+  Language and provider preferences are stored in the browser's local storage;
+  source and translated text are not stored there by this plugin.
+- **Logs.** The Host never logs source or translated content. Log records carry
+  operational diagnostics only, such as provider names, lengths, ids and
+  counters. Provider-side logging is outside the plugin's control.
+- **Control.** Set `failover: false` to prevent automatic cross-provider
+  fallback on the direct route. Configure only approved endpoints, or disable
+  this plugin/tool where external processing is not permitted. The shipped
+  translator route follows its own provider configuration and policy.
+
+The `translate_text` agent tool's description also states that it sends the
+submitted text to an external machine-translation provider. Applications
+should make this data flow clear before users submit sensitive material.
 
 ## The panel and the tool share one code path
 
