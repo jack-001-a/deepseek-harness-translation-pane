@@ -1305,3 +1305,41 @@ test('tool: execute surfaces the same provider-unreachable code as the panel', a
     },
   )
 })
+
+
+test('splitter: complete inline syntax tokens stay inside one fragment', () => {
+  const cases = [
+    { token: '{{customer_id}}', maxChars: 24 },
+    { token: '`customer_id`', maxChars: 24 },
+    { token: '<span data-id="customer">', maxChars: 36 },
+    { token: '[account guide](https://example.com/account/reference)', maxChars: 64 },
+    { token: 'https://example.com/path/to/resource', maxChars: 48 },
+    { token: '```json\\n', maxChars: 32 },
+  ]
+
+  for (const { token, maxChars } of cases) {
+    const source = `${'x'.repeat(20)}${token}${' y'.repeat(40)}`
+    const fragments = splitText(source, maxChars)
+    assert.equal(fragments.join(''), source, 'protected splitting must preserve every source character')
+    assert.ok(fragments.some((fragment) => fragment.includes(token)), `token must remain whole: ${token}`)
+    for (const fragment of fragments) {
+      assert.ok(fragment.length <= maxChars, 'no fragment may exceed the provider limit')
+    }
+  }
+})
+
+test('splitter: mixed-language and RTL text remains lossless around markup', () => {
+  const source = [
+    'English paragraph with 中文内容 and 日本語.',
+    '```js',
+    'const label = "{{account_name}}"',
+    '```',
+    '<span lang="ar">مرحبا بالعالم</span>',
+    '[Documentation](https://example.com/docs)',
+  ].join('\\n\\n')
+  const fragments = splitText(source, 48)
+  assert.equal(fragments.join(''), source)
+  for (const fragment of fragments) {
+    assert.ok(fragment.length <= 48)
+  }
+})
