@@ -15,7 +15,7 @@ on npm and on [GitHub](https://github.com/jack-001-a/deepseek-harness-translatio
 | Failover | Falls over to the other anonymous provider when the selected one is unreachable, and says which service served the text |
 | Agent tool | `translate_text(text, targetLanguage, sourceLanguage?, format?)` returning the translation |
 
-The language and provider choices are remembered in the page's local storage.
+The language, provider and format choices are remembered in the page's local storage.
 
 Choose **JSON values only** in the Format selector to translate JSON safely. The parser validates the document, leaves object keys and all non-string values untouched, and translates only string values. It preserves the original JSON whitespace and layout rather than reserializing the document. The agent tool accepts the same opt-in `format: "json"` argument; the default remains plain text.
 
@@ -116,10 +116,13 @@ the requested provider when failover is enabled. A long document can be sent
 as several fragment requests, and a single document can be served by both
 providers.
 
-- **What leaves the Host.** The source text, source-language hint (when
-  supplied), target language and protocol metadata required by the selected
-  endpoint. Do not submit secrets, credentials, personal data or confidential
-  source code unless the user is authorized to disclose them to that provider.
+- **What leaves the Host.** In plain-text mode, the submitted source text,
+  source-language hint (when supplied), target language and protocol metadata
+  required by the selected endpoint. In JSON mode, only decoded JSON string
+  values are sent for translation; object keys, structural punctuation,
+  whitespace, numbers, booleans and null remain local. Do not submit secrets,
+  credentials, personal data or confidential source code unless the user is
+  authorized to disclose them to that provider.
 - **Who receives it.** Microsoft receives requests routed to the Edge/Bing
   endpoint; Google receives requests routed to Google Translate. The
   `ctx.translator` route follows the provider and account configuration of
@@ -133,7 +136,7 @@ providers.
 - **Local storage.** Completed translations may be kept in the bounded in-memory
   LRU cache for the lifetime of this Host service. The cache is not a durable
   translation history and is discarded when the service unloads or restarts.
-  Language and provider preferences are stored in the browser's local storage;
+  Language, provider and format preferences are stored in the browser's local storage;
   source and translated text are not stored there by this plugin.
 - **Logs.** The Host never logs source or translated content. Log records carry
   operational diagnostics only, such as provider names, lengths, ids and
