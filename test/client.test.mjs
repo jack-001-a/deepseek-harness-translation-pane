@@ -786,3 +786,29 @@ test('the provider-unreachable failure is distinct from the carrier failure', as
     assert.equal(textOf(alert), expected, `${code} must map onto its own copy`)
   }
 })
+
+test('the Format selector sends JSON mode to the Host and explains its boundary', async () => {
+  loadPluginState = await loadPlugin()
+  let submitted
+  const { mounted } = mountPanel({
+    translate: (args) => {
+      submitted = args
+      return { text: '{"message":"你好"}', provider: 'bing', cached: false, durationMs: 1 }
+    },
+  })
+  await flushPanel()
+  const format = findOne(
+    mounted.tree,
+    (node) => node.type === 'select' && String(node.props?.id).endsWith('-format'),
+    'the Format selector',
+  )
+  format.props.onChange({ target: { value: 'json' } })
+  await flushPanel()
+  assert.match(textOf(mounted.tree), /Only string values are sent to the translation provider/)
+  await typeSource(mounted, '{"message":"hello"}')
+  translateButton(mounted.tree).props.onClick()
+  await flushPanel()
+
+  assert.equal(submitted.format, 'json')
+  assert.equal(submitted.text, '{"message":"hello"}')
+})

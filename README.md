@@ -17,6 +17,8 @@ on npm and on [GitHub](https://github.com/jack-001-a/deepseek-harness-translatio
 
 The language and provider choices are remembered in the page's local storage.
 
+Choose **JSON values only** in the Format selector to translate JSON safely. The parser validates the document, leaves object keys and all non-string values untouched, and translates only string values. It preserves the original JSON whitespace and layout rather than reserializing the document. The agent tool accepts the same opt-in `format: "json"` argument; the default remains plain text.
+
 ## How translation runs
 
 The Host half prefers the shipped `ctx.translator` service when the
