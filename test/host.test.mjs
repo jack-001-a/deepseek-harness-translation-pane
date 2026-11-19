@@ -1314,7 +1314,7 @@ test('splitter: complete inline syntax tokens stay inside one fragment', () => {
     { token: '<span data-id="customer">', maxChars: 36 },
     { token: '[account guide](https://example.com/account/reference)', maxChars: 64 },
     { token: 'https://example.com/path/to/resource', maxChars: 48 },
-    { token: '```json\\n', maxChars: 32 },
+    { token: '```json\n', maxChars: 32 },
   ]
 
   for (const { token, maxChars } of cases) {
@@ -1336,7 +1336,7 @@ test('splitter: mixed-language and RTL text remains lossless around markup', () 
     '```',
     '<span lang="ar">مرحبا بالعالم</span>',
     '[Documentation](https://example.com/docs)',
-  ].join('\\n\\n')
+  ].join('\n\n')
   const fragments = splitText(source, 48)
   assert.equal(fragments.join(''), source)
   for (const fragment of fragments) {
