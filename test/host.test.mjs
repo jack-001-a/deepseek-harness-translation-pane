@@ -1314,11 +1314,11 @@ test('splitter: complete inline syntax tokens stay inside one fragment', () => {
     { token: '<span data-id="customer">', maxChars: 36 },
     { token: '[account guide](https://example.com/account/reference)', maxChars: 64 },
     { token: 'https://example.com/path/to/resource', maxChars: 48 },
-    { token: '```json\n', maxChars: 24 },
+    { prefix: 'x\n', token: '```json\n', maxChars: 8 },
   ]
 
-  for (const { token, maxChars } of cases) {
-    const source = `${'x'.repeat(20)}${token}${' y'.repeat(40)}`
+  for (const { token, maxChars, prefix = 'x'.repeat(20) } of cases) {
+    const source = `${prefix}${token}${' y'.repeat(40)}`
     const fragments = splitText(source, maxChars)
     assert.equal(fragments.join(''), source, 'protected splitting must preserve every source character')
     assert.ok(fragments.some((fragment) => fragment.includes(token)), `token must remain whole: ${token}`)
