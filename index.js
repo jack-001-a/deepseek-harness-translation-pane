@@ -224,7 +224,7 @@ function protectedTextRanges(text) {
     /^ {0,3}(?:`{3,}|~{3,})[^\n]*(?:\n|$)/gm, // Markdown fence marker lines
     /\{\{[\s\S]*?\}\}/g, // common template placeholders
     /\$\{[^}\n]*\}/g, // interpolation placeholders
-    /<[^>\n]*>/g, // HTML/XML tags
+    /<\/?[A-Za-z][^>\n]*>/g, // HTML/XML tags
     /\[[^\]\n]*\]\([^)]+\)/g, // Markdown links
     /https?:\/\/[^\s<>()]+/g, // URLs
   ]
