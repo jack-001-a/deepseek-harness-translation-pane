@@ -279,6 +279,46 @@ function protectBoundary(ranges, offset, boundary, maxChars) {
  * @param maxChars - per-fragment limit in UTF-16 code units.
  * @returns the fragments in source order.
  */
+/**
+ * Validate JSON and locate only string-value tokens, never object keys.
+ *
+ * Source offsets let us replace values without reserializing the document:
+ * whitespace, key spelling, numeric notation, booleans, null and nesting
+ * remain unchanged.
+ * @param source - the JSON source text.
+ * @returns string-value tokens in source order.
+ */
+function jsonStringValueTokens(source) {
+  JSON.parse(source)
+  const tokens = []
+  let index = 0
+  while (index < source.length) {
+    if (source[index] !== '"') {
+      index += 1
+      continue
+    }
+    const start = index
+    index += 1
+    while (index < source.length) {
+      const character = source[index]
+      if (character === '\\') {
+        index += 2
+        continue
+      }
+      index += 1
+      if (character === '"') break
+    }
+    const end = index
+    let next = end
+    while (next < source.length && /[\t\n\r ]/u.test(source[next])) next += 1
+    if (source[next] !== ':') {
+      const value = JSON.parse(source.slice(start, end))
+      tokens.push({ start, end, value })
+    }
+  }
+  return tokens
+}
+
 export function splitText(text, maxChars) {
   if (maxChars < 1) throw new RangeError('splitText: maxChars must be positive')
   if (text.length <= maxChars) return [text]
@@ -669,7 +709,7 @@ export class TranslationPaneService {
    * @param signal - the caller's cancellation; the Gateway injects it.
    * @returns the translation and the facts behind it.
    */
-  async translate(request, text, targetLanguage, sourceLanguage, provider, signal) {
+  async translate(request, text, targetLanguage, sourceLanguage, provider, format, signal) {
     const nested = request !== null && typeof request === 'object' ? request : {}
     const envelope = nested.request !== null && typeof nested.request === 'object' ? nested.request : {}
     return await this.translateRequest(
@@ -678,6 +718,7 @@ export class TranslationPaneService {
         targetLanguage: envelope.targetLanguage ?? nested.targetLanguage ?? targetLanguage,
         sourceLanguage: envelope.sourceLanguage ?? nested.sourceLanguage ?? sourceLanguage,
         provider: envelope.provider ?? nested.provider ?? provider,
+        format: envelope.format ?? nested.format ?? format,
       },
       signal,
     )
@@ -692,7 +733,7 @@ export class TranslationPaneService {
   async translateRequest(request, signal) {
     const started = Date.now()
     const spec = this.parseRequest(request)
-    if (spec.text.trim().length === 0) {
+    if (spec.format === 'text' && spec.text.trim().length === 0) {
       return {
         text: '',
         sourceLanguage: spec.sourceLanguage,
@@ -703,7 +744,7 @@ export class TranslationPaneService {
       }
     }
 
-    const key = `${spec.providerKey}|${spec.sourceLanguage}|${spec.targetLanguage}|${spec.text}`
+    const key = `${spec.format}|${spec.providerKey}|${spec.sourceLanguage}|${spec.targetLanguage}|${spec.text}`
     const cached = this.cache.get(key)
     if (cached !== undefined) {
       this.cacheHits += 1
@@ -740,6 +781,18 @@ export class TranslationPaneService {
       typeof source.provider === 'string' && source.provider.trim().length > 0
         ? source.provider.trim()
         : undefined
+    const format = source.format === undefined ? 'text' : source.format
+    if (format !== 'text' && format !== 'json') {
+      throw new TranslationPaneError(CODE.invalidRequest, 'translationPane: format must be "text" or "json"')
+    }
+    let jsonTokens
+    if (format === 'json') {
+      try {
+        jsonTokens = jsonStringValueTokens(text)
+      } catch {
+        throw new TranslationPaneError(CODE.invalidRequest, 'translationPane: JSON mode requires valid JSON text')
+      }
+    }
     const route = this.route()
     const providers = route === 'translator' ? TRANSLATOR_PROVIDERS : DIRECT_PROVIDERS
     if (requested !== undefined && !providers.includes(requested)) {
@@ -758,6 +811,8 @@ export class TranslationPaneService {
     }
     return {
       text,
+      format,
+      ...(jsonTokens === undefined ? {} : { jsonTokens }),
       sourceLanguage,
       targetLanguage,
       // The direct route always names a provider; the shipped translator
@@ -877,8 +932,14 @@ export class TranslationPaneService {
     const route = translator === undefined ? 'direct' : 'translator'
     const deadline = this.deadline(controller.signal, this.config.timeoutMs)
     try {
-      const fragments = splitText(spec.text, this.fragmentSize(translator))
-      const results = await this.dispatch(fragments, spec, route, translator, deadline.signal)
+      const fragmentSize = this.fragmentSize(translator)
+      const groups = spec.format === 'json'
+        ? spec.jsonTokens.map((token) => token.value.length === 0 ? [] : splitText(token.value, fragmentSize))
+        : [splitText(spec.text, fragmentSize)]
+      const fragments = groups.flat()
+      const results = fragments.length === 0
+        ? []
+        : await this.dispatch(fragments, spec, route, translator, deadline.signal)
       // The shipped service may resolve a different provider than the caller
       // asked for, and the direct route may fall over to another provider; the
       // providers that actually answered are the ones to report. A long demand
@@ -892,7 +953,7 @@ export class TranslationPaneService {
             .filter((value) => typeof value === 'string' && value.length > 0),
         ),
       ]
-      const provider = served[0] ?? spec.provider
+      const provider = served[0] ?? (results.length === 0 ? 'none' : spec.provider)
       this.log(
         'debug',
         `translated ${spec.text.length} characters with ${served.join('+') || provider} in ${fragments.length} fragments`,
@@ -904,7 +965,9 @@ export class TranslationPaneService {
           : undefined
       const requestedProvider = spec.requested ?? spec.provider
       return {
-        text: results.map((entry) => entry.text).join(''),
+        text: spec.format === 'json'
+          ? this.replaceJsonStringValues(spec.text, spec.jsonTokens, groups, results)
+          : results.map((entry) => entry.text).join(''),
         sourceLanguage: spec.sourceLanguage,
         ...(detected === undefined ? {} : { detectedSourceLanguage: detected }),
         targetLanguage: spec.targetLanguage,
@@ -927,6 +990,32 @@ export class TranslationPaneService {
     } finally {
       deadline.dispose()
     }
+  }
+
+  /**
+   * Replace JSON string values in reverse source order so offsets remain valid.
+   * Object keys and non-string JSON tokens are never sent to a provider.
+   * @param source - the original JSON document.
+   * @param tokens - string-value tokens from the validated source.
+   * @param groups - fragments belonging to each string value.
+   * @param results - translated fragment results in dispatch order.
+   * @returns valid JSON with only string values translated.
+   */
+  replaceJsonStringValues(source, tokens, groups, results) {
+    let cursor = 0
+    const replacements = tokens.map((token, index) => {
+      const count = groups[index].length
+      const translated = results.slice(cursor, cursor + count).map((entry) => entry.text).join('')
+      cursor += count
+      return { ...token, encoded: JSON.stringify(count === 0 ? token.value : translated) }
+    })
+    let output = source
+    for (let index = replacements.length - 1; index >= 0; index -= 1) {
+      const token = replacements[index]
+      output = output.slice(0, token.start) + token.encoded + output.slice(token.end)
+    }
+    JSON.parse(output)
+    return output
   }
 
   /**
@@ -1535,7 +1624,7 @@ export function apply(ctx, config) {
     () =>
       ctx.tools.register({
         name: 'translate_text',
-        description: `Translate text between languages by sending the submitted source text to the configured machine-translation provider (Microsoft Edge/Bing or Google Translate on the direct route; the configured provider on the shipped-translator route). Tell the user that their text is processed by that external provider before submitting sensitive or confidential content. Use it when the user asks for a translation, or when you need a sentence rendered in another language. Returns only the translation. Text up to ${resolved.maxTextChars} characters is accepted; longer text is split into provider-sized requests and translated in order, so the result keeps the structure of the source. On the direct endpoint route, if one endpoint cannot be reached and failover is enabled, the other provider may receive the same fragment.`,
+        description: `Translate text between languages by sending the submitted source text to the configured machine-translation provider (Microsoft Edge/Bing or Google Translate on the direct route; the configured provider on the shipped-translator route). Tell the user that their text is processed by that external provider before submitting sensitive or confidential content. Use it when the user asks for a translation, or when you need a sentence rendered in another language. Returns only the translation. For JSON input, pass format="json" to preserve keys, structure and non-string values while translating string values only. Text up to ${resolved.maxTextChars} characters is accepted; longer text is split into provider-sized requests and translated in order, so the result keeps the structure of the source. On the direct endpoint route, if one endpoint cannot be reached and failover is enabled, the other provider may receive the same fragment.`,
         parameters: {
           type: 'object',
           additionalProperties: false,
@@ -1552,6 +1641,11 @@ export function apply(ctx, config) {
             sourceLanguage: {
               type: 'string',
               description: 'Source language tag; omit or pass "auto" to detect it.',
+            },
+            format: {
+              type: 'string',
+              enum: ['text', 'json'],
+              description: 'Use "json" to preserve JSON keys, nesting, whitespace and non-string values while translating only string values. Defaults to "text".',
             },
           },
           required: ['text', 'targetLanguage'],
@@ -1583,6 +1677,7 @@ export function apply(ctx, config) {
               text: args.text,
               targetLanguage: args.targetLanguage,
               sourceLanguage: args.sourceLanguage,
+              format: args.format,
             },
             exec.signal,
           )
