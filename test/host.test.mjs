@@ -1200,6 +1200,27 @@ test('concurrency: the fragments are dispatched with a bounded concurrency', asy
   assert.equal(peak, 2, 'the concurrency must be bounded by the configuration')
 })
 
+test('concurrency: a failed fragment prevents queued fragments from being dispatched', async (t) => {
+  const calls = []
+  mockFetch(async (_url, init) => {
+    const fragment = JSON.parse(init.body)[0]
+    calls.push(fragment)
+    if (fragment.startsWith('a')) return new Response('bad request', { status: 400 })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness({
+    config: { fragmentChars: 50, maxConcurrency: 2, failover: false, maxRetries: 0 },
+  })
+  await assert.rejects(
+    h.service.translate({ text: 'a'.repeat(50) + 'b'.repeat(50) + 'c'.repeat(50) + 'd'.repeat(50), targetLanguage: 'en' }),
+    (error) => error.code === 'translation-pane/http',
+  )
+  assert.equal(calls.length, 2, 'only the already-active fragments may reach the provider')
+  assert.deepEqual(calls, ['a'.repeat(50), 'b'.repeat(50)])
+})
+
 test('logging: the source text never reaches the log', async (t) => {
   mockFetch(async () => jsonResponse(bingPayload('ok')), t)
   const secret = 'a-very-private-sentence'
