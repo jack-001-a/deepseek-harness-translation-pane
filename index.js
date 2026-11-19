@@ -950,21 +950,32 @@ export class TranslationPaneService {
   async dispatch(fragments, spec, route, translator, signal) {
     const results = new Array(fragments.length)
     let next = 0
+    let failure
     const worker = async () => {
       for (;;) {
+        // Once one fragment fails, do not start more third-party requests.
+        // Other workers already in flight are allowed to settle before this
+        // method rejects, so there are no detached fragment promises.
+        if (failure !== undefined) return
         const index = next
         next += 1
         if (index >= fragments.length) return
-        results[index] =
-          route === 'translator'
-            ? await this.translateFragment(translator, spec, fragments[index], signal)
-            : await this.translateDirect(spec, fragments[index], signal)
+        try {
+          results[index] =
+            route === 'translator'
+              ? await this.translateFragment(translator, spec, fragments[index], signal)
+              : await this.translateDirect(spec, fragments[index], signal)
+        } catch (error) {
+          failure ??= error
+          return
+        }
       }
     }
     const workers = []
     const count = Math.min(this.config.maxConcurrency, fragments.length)
     for (let index = 0; index < count; index += 1) workers.push(worker())
     await Promise.all(workers)
+    if (failure !== undefined) throw failure
     return results
   }
 
