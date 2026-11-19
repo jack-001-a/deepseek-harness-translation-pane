@@ -1215,7 +1215,7 @@ test('concurrency: a failed fragment prevents queued fragments from being dispat
   })
   await assert.rejects(
     h.service.translate({ text: 'a'.repeat(50) + 'b'.repeat(50) + 'c'.repeat(50) + 'd'.repeat(50), targetLanguage: 'en' }),
-    (error) => error.code === 'translation-pane/http',
+    (error) => error.code === 'translation-pane/provider-error',
   )
   assert.equal(calls.length, 2, 'only the already-active fragments may reach the provider')
   assert.deepEqual(calls, ['a'.repeat(50), 'b'.repeat(50)])
