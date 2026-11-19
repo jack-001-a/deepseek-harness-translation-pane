@@ -1484,7 +1484,7 @@ export function apply(ctx, config) {
     () =>
       ctx.tools.register({
         name: 'translate_text',
-        description: `Translate text between languages with an anonymous machine-translation endpoint. Use it when the user asks for a translation, or when you need a sentence rendered in another language. Returns only the translation. Text up to ${resolved.maxTextChars} characters is accepted; longer text is split into provider-sized requests and translated in order, so the result keeps the structure of the source. On the direct endpoint route, if one endpoint cannot be reached, another is tried automatically.`,
+        description: `Translate text between languages by sending the submitted source text to the configured machine-translation provider (Microsoft Edge/Bing or Google Translate on the direct route; the configured provider on the shipped-translator route). Tell the user that their text is processed by that external provider before submitting sensitive or confidential content. Use it when the user asks for a translation, or when you need a sentence rendered in another language. Returns only the translation. Text up to ${resolved.maxTextChars} characters is accepted; longer text is split into provider-sized requests and translated in order, so the result keeps the structure of the source. On the direct endpoint route, if one endpoint cannot be reached and failover is enabled, the other provider may receive the same fragment.`,
         parameters: {
           type: 'object',
           additionalProperties: false,
