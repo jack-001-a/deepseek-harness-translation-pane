@@ -1367,7 +1367,7 @@ test('JSON mode translates only string values and preserves the original documen
     nested: { label: 'translated:world', count: 2, enabled: true, empty: '' },
     items: ['translated:one', null, 3, { name: 'translated:Ada' }],
   })
-  assert.deepEqual(requests, ['hello', 'world', 'one', 'Ada'])
+  assert.deepEqual(requests.sort(), ['Ada', 'hello', 'one', 'world'])
 })
 
 test('JSON mode rejects malformed JSON before contacting a provider', async (t) => {
@@ -1446,4 +1446,26 @@ test('translate_text agent tool exposes and forwards JSON format', async (t) => 
     { signal: new AbortController().signal },
   )
   assert.equal(result.text, '{"message":"T:hello"}')
+})
+
+test('JSON mode stops dispatching queued values after the first provider failure', async (t) => {
+  const calls = []
+  mockFetch(async (_url, init) => {
+    const fragment = JSON.parse(init.body)[0]
+    calls.push(fragment)
+    if (fragment.startsWith('a')) return new Response('bad request', { status: 400 })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness({
+    config: { fragmentChars: 50, maxConcurrency: 2, failover: false, maxRetries: 0 },
+  })
+  const source = JSON.stringify({ a: 'a'.repeat(50), b: 'b'.repeat(50), c: 'c'.repeat(50), d: 'd'.repeat(50) })
+  await assert.rejects(
+    h.service.translate({ text: source, targetLanguage: 'en', format: 'json' }),
+    (error) => error.code === 'translation-pane/provider-error',
+  )
+  assert.equal(calls.length, 2)
+  assert.deepEqual(calls, ['a'.repeat(50), 'b'.repeat(50)])
 })

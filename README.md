@@ -13,7 +13,7 @@ on npm and on [GitHub](https://github.com/jack-001-a/deepseek-harness-translatio
 | Sidebar panel rail | A **Translation** icon that opens the page in the main column |
 | Translation page | Source/target language pickers, provider picker, source and result cards, a swap action, copy, clear, a live character counter, and `Ctrl+Enter` to translate |
 | Failover | Falls over to the other anonymous provider when the selected one is unreachable, and says which service served the text |
-| Agent tool | `translate_text(text, targetLanguage, sourceLanguage?)` returning the translation |
+| Agent tool | `translate_text(text, targetLanguage, sourceLanguage?, format?)` returning the translation |
 
 The language and provider choices are remembered in the page's local storage.
 

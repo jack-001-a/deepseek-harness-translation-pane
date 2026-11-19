@@ -1090,21 +1090,33 @@ export class TranslationPaneService {
   async dispatch(fragments, spec, route, translator, signal) {
     const results = new Array(fragments.length)
     let next = 0
+    let failed = false
+    let failure
     const worker = async () => {
       for (;;) {
+        // Stop claiming queued work after any fragment fails. Workers already
+        // in flight settle before the first failure is rethrown.
+        if (failed) return
         const index = next
         next += 1
         if (index >= fragments.length) return
-        results[index] =
-          route === 'translator'
-            ? await this.translateFragment(translator, spec, fragments[index], signal)
-            : await this.translateDirect(spec, fragments[index], signal)
+        try {
+          results[index] =
+            route === 'translator'
+              ? await this.translateFragment(translator, spec, fragments[index], signal)
+              : await this.translateDirect(spec, fragments[index], signal)
+        } catch (error) {
+          if (!failed) failure = error
+          failed = true
+          return
+        }
       }
     }
     const workers = []
     const count = Math.min(this.config.maxConcurrency, fragments.length)
     for (let index = 0; index < count; index += 1) workers.push(worker())
     await Promise.all(workers)
+    if (failed) throw failure
     return results
   }
 
