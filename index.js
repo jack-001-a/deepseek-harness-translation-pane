@@ -912,6 +912,10 @@ export class TranslationPaneService {
       // anonymous endpoint on a result nobody wants.
       if (entry.waiters <= 0) {
         entry.controller.abort(new Error('translationPane: every caller left the request'))
+        // Do not let a new caller join work that has already been abandoned.
+        // The old promise's finally block is identity-guarded, so it cannot
+        // remove a replacement entry installed for the same key.
+        if (this.inflight.get(entry.key) === entry) this.inflight.delete(entry.key)
       }
     }
     try {
