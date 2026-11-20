@@ -58,7 +58,7 @@ try {
 
   // The descriptor is attached to the exported concrete service class; read
   // it there rather than through Cordis's traceable service proxy.
-  const remote = TranslationPaneService.prototype[Symbol.for('@deepseek-ai/dsh-typert-protocol/remote-methods')]
+  const remote = TranslationPaneService.prototype['@deepseek-ai/dsh-typert-protocol/remote-methods']
   assert.equal(remote?.version, 1)
   assert.deepEqual(remote?.methods?.map((entry) => entry.method), ['describe', 'translate'])
 
