@@ -1523,8 +1523,14 @@ export class TranslationPaneService {
     try {
       text = await translator.translate(resolved, signal)
     } catch (error) {
+      // A request-wide deadline or caller cancellation is authoritative even
+      // when the upstream translator rejects with its own AbortError shape.
+      if (signal?.aborted) throw this.abortReason(signal)
       throw this.mapTranslatorError(error, spec)
     }
+    // Some translator implementations may settle after receiving abort.
+    // Do not accept a late success after the shared request deadline.
+    if (signal?.aborted) throw this.abortReason(signal)
     if (typeof text !== 'string') {
       throw new TranslationPaneError(
         CODE.invalidResponse,
