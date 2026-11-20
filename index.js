@@ -1387,7 +1387,16 @@ export class TranslationPaneService {
         { provider, status },
       )
     }
-    const body = await this.readBody(response, this.config.maxResponseBytes, provider)
+    let body
+    try {
+      body = await this.readBody(response, this.config.maxResponseBytes, provider)
+    } catch (error) {
+      // Fetch aborts body consumption when its signal fires after headers.
+      // Preserve the request's structured timeout/cancellation reason rather
+      // than leaking the implementation-specific AbortError from the reader.
+      if (signal?.aborted) throw this.abortReason(signal)
+      throw error
+    }
     let payload
     try {
       payload = JSON.parse(body)
