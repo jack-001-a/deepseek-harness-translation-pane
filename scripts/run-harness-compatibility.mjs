@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { apply } from '../index.js'
+import { apply, inject } from '../index.js'
 
 const harnessRoot = process.env.DSH_HARNESS_ROOT
 const harnessVersion = process.env.DSH_HARNESS_VERSION
@@ -48,9 +48,9 @@ try {
   await testkit.mountAgentLoopTestDependencies(context)
   await context.plugin(agentLoop.default, { agents: [] })
 
-  // Load the production plugin through Cordis so its declared `inject = ['tools']`
-  // dependency is resolved exactly as it is in a Host plugin composition.
-  await context.plugin(apply)
+  // Load the production plugin descriptor through Cordis so its declared
+  // `tools` dependency is resolved as it is in a Host plugin composition.
+  await context.plugin({ name: 'dsh-translation-pane-compatibility', inject, apply })
   const service = context.get('translationPane')
   assert.ok(service, 'the real Cordis context must expose translationPane')
   assert.equal(service.describe().route, 'direct')
