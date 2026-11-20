@@ -1330,7 +1330,7 @@ test('splitter: complete inline syntax tokens stay inside one fragment', () => {
 
 test('splitter: boundaries preserve combining marks and emoji grapheme clusters', () => {
   const cases = [
-    { source: 'a'.repeat(7) + 'e\\u0301' + 'z'.repeat(20), maxChars: 8 },
+    { source: 'a'.repeat(7) + 'é' + 'z'.repeat(20), maxChars: 8 },
     { source: 'a'.repeat(9) + '👩🏽‍💻' + 'z'.repeat(20), maxChars: 12 },
   ]
 
