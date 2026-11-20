@@ -48,9 +48,9 @@ try {
   await testkit.mountAgentLoopTestDependencies(context)
   await context.plugin(agentLoop.default, { agents: [] })
 
-  // Apply the production plugin to a real Cordis context. Its effects register
-  // the Remote service and the AgentLoop tool through the actual Host services.
-  apply(context)
+  // Load the production plugin through Cordis so its declared `inject = ['tools']`
+  // dependency is resolved exactly as it is in a Host plugin composition.
+  await context.plugin(apply)
   const service = context.get('translationPane')
   assert.ok(service, 'the real Cordis context must expose translationPane')
   assert.equal(service.describe().route, 'direct')
