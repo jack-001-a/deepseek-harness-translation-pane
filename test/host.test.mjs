@@ -1843,10 +1843,16 @@ test('unload: waiters release when a translator ignores abort forever', { timeou
   const pending = h.service.translate({ text: 'never settles', targetLanguage: 'en' })
   await Promise.resolve()
   assert.equal(h.service.inflight.size, 1, 'the shared request should be registered')
+  const [entry] = h.service.inflight.values()
+  assert.ok(entry, 'the shared entry should be observable before unload')
   await h.unload()
 
   await assert.rejects(
     pending,
+    (error) => error.message === 'translationPane: the service was unloaded',
+  )
+  await assert.rejects(
+    entry.promise,
     (error) => error.message === 'translationPane: the service was unloaded',
   )
   assert.equal(h.service.inflight.size, 0, 'unload must release the abandoned in-flight entry')
