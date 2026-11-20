@@ -1851,3 +1851,16 @@ test('unload: waiters release when a translator ignores abort forever', { timeou
   )
   assert.equal(h.service.inflight.size, 0, 'unload must release the abandoned in-flight entry')
 })
+
+
+test('unload: a late empty-JSON completion cannot populate the cache', async (t) => {
+  const h = harness()
+  const pending = h.service.translateRequest({ text: '{"empty":""}', format: 'json', targetLanguage: 'en' })
+  await h.unload()
+
+  await assert.rejects(
+    pending,
+    (error) => error.message === 'translationPane: the service was unloaded',
+  )
+  assert.equal(h.service.cache.size, 0, 'an unloaded service must not publish a late cache entry')
+})
