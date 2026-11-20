@@ -296,8 +296,12 @@ once the input outgrows the card.
 npm test        # node --test
 ```
 
-The tests run against the real module with a fake Cordis context and a stubbed
-`fetch`; they need no Harness installation and no network.
+The fast unit suite uses a fake Cordis context and a stubbed `fetch`; it needs
+no Harness installation and no network. Pull requests also run a separate
+real-runtime compatibility matrix against pinned DeepSeek Harness
+`0.2.2-rc.4` and `0.2.2-rc.5` revisions. See
+[Harness runtime compatibility](docs/harness-runtime-compatibility.md) for
+the exact scope and limits of that evidence.
 
 ## Known limitations
 
