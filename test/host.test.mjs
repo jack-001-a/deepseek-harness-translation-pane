@@ -747,6 +747,28 @@ test('cache: an identical demand is served from the cache', async (t) => {
   assert.equal(described.cacheEntries, 1)
 })
 
+
+
+test('cache: an already-aborted caller cannot receive a cached result', async (t) => {
+  let calls = 0
+  mockFetch(async () => {
+    calls += 1
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness()
+  await h.service.translate({ text: 'hi', targetLanguage: 'en' })
+  const controller = new AbortController()
+  controller.abort(new Error('the caller no longer wants this result'))
+
+  await assert.rejects(
+    h.service.translateRequest({ text: 'hi', targetLanguage: 'en' }, controller.signal),
+    (error) => error.message === 'the caller no longer wants this result',
+  )
+  assert.equal(calls, 1, 'an aborted cache hit must not reach the provider')
+  assert.equal(h.service.describe().cacheHits, 0, 'an aborted demand must not be counted as a cache hit')
+})
+
 test('cache: the cache is bounded', async (t) => {
   mockFetch(async (_url, init) => jsonResponse(bingPayload(JSON.parse(init.body)[0])), t)
   const h = harness({ config: { cacheSize: 2 } })
