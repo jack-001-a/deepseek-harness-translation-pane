@@ -797,6 +797,36 @@ test('coalescing: identical concurrent demands share one provider call', async (
   assert.equal(second.text, 'ok')
 })
 
+
+
+test('coalescing: a new caller does not join work abandoned by every prior caller', async (t) => {
+  let calls = 0
+  mockFetch(async (_url, init) => {
+    calls += 1
+    if (calls === 1) {
+      return await new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true })
+      })
+    }
+    return jsonResponse(bingPayload('fresh result'))
+  }, t)
+
+  const h = harness()
+  const controller = new AbortController()
+  const abandoned = h.service.translateRequest(
+    { text: 'same demand', targetLanguage: 'en' },
+    controller.signal,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  controller.abort(new Error('the only caller left'))
+  await assert.rejects(abandoned, (error) => error.message === 'the only caller left')
+
+  const fresh = await h.service.translate({ text: 'same demand', targetLanguage: 'en' })
+  assert.equal(fresh.text, 'fresh result')
+  assert.equal(calls, 2, 'the new caller must start fresh provider work')
+  assert.equal(fresh.cached, false)
+})
+
 test('rate limit: an exhausted bucket refuses the request', async (t) => {
   let calls = 0
   mockFetch(async () => {
