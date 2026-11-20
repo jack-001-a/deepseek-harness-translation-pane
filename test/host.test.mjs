@@ -1711,3 +1711,30 @@ test('JSON mode keeps grapheme clusters intact across provider fragment boundari
     assert.ok(graphemeBoundaries.has(boundary), `JSON provider fragment boundary ${boundary} must not split a grapheme`)
   }
 })
+
+
+test('timeout: a request deadline after response headers preserves the structured timeout error', async (t) => {
+  let calls = 0
+  mockFetch(async (_url, init) => {
+    calls += 1
+    const body = new ReadableStream({
+      start(controller) {
+        init.signal.addEventListener('abort', () => {
+          controller.error(new DOMException('The operation was aborted.', 'AbortError'))
+        }, { once: true })
+      },
+    })
+    return new Response(body)
+  }, t)
+
+  const h = harness({ config: { timeoutMs: 30, attemptTimeoutMs: 1000 } })
+  await assert.rejects(
+    h.service.translate({ text: 'hello', targetLanguage: 'en', provider: 'google' }),
+    (error) => {
+      assert.equal(error.code, 'translation-pane/timeout')
+      assert.equal(error.details.timeoutMs, 30)
+      return true
+    },
+  )
+  assert.equal(calls, 1, 'an overall request deadline must not fail over to another provider')
+})
