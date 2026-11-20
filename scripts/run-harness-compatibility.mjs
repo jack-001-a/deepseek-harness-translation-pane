@@ -56,7 +56,9 @@ try {
   assert.equal(service.describe().route, 'direct')
   assert.deepEqual(service.describe().providers, ['bing', 'google'])
 
-  const remote = service[Symbol.for('@deepseek-ai/dsh-typert-protocol/remote-methods')]
+  // Cordis exposes provided services through a traceable proxy. The Typert
+  // descriptor is intentionally defined on the concrete service prototype.
+  const remote = Object.getPrototypeOf(service)?.[Symbol.for('@deepseek-ai/dsh-typert-protocol/remote-methods')]
   assert.equal(remote?.version, 1)
   assert.deepEqual(remote?.methods?.map((entry) => entry.method), ['describe', 'translate'])
 
