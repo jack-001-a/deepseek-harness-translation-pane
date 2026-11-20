@@ -1358,7 +1358,14 @@ export class TranslationPaneService {
       clearTimeout(timer)
     }
     if (!response.ok) {
-      await response.body?.cancel?.()
+      // The caller/request deadline remains authoritative after headers arrive.
+      if (signal?.aborted) throw this.abortReason(signal)
+      // Error bodies are irrelevant. Cancellation is best-effort and must not
+      // hold the request open if a stream's underlying cancel hook stalls.
+      try {
+        const cancellation = response.body?.cancel?.()
+        cancellation?.catch?.(() => {})
+      } catch {}
       const status = response.status
       const retryAfterMs = parseRetryAfter(response.headers?.get?.('retry-after'))
       if (status === 429) {
@@ -1442,7 +1449,11 @@ export class TranslationPaneService {
         if (chunk.done) break
         bytes += chunk.value.byteLength
         if (bytes > limit) {
-          await reader.cancel()
+          // Reject immediately; a hostile stream may never settle its cancel hook.
+          try {
+            const cancellation = reader.cancel()
+            cancellation?.catch?.(() => {})
+          } catch {}
           throw new TranslationPaneError(
             CODE.invalidResponse,
             `translationPane: the ${provider} response exceeds ${limit} bytes`,
