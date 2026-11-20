@@ -1555,3 +1555,40 @@ test('JSON mode safely handles escaped keys and values plus translated JSON meta
     unicode: '译文 "quoted" \\ path\n🚀',
   })
 })
+
+
+test('JSON mode keeps grapheme clusters intact across provider fragment boundaries', async (t) => {
+  const fragments = []
+  mockFetch(async (_url, init) => {
+    const fragment = JSON.parse(init.body)[0]
+    fragments.push(fragment)
+    return jsonResponse(bingPayload(fragment))
+  }, t)
+
+  const h = harness({ config: { fragmentChars: 12 } })
+  const value = 'a'.repeat(7) + 'e\\u0301' + 'z'.repeat(10) + 'x'.repeat(9) + '👩🏽‍💻' + 'q'.repeat(20)
+  const source = JSON.stringify({ message: value })
+  const result = await h.service.translate({
+    text: source,
+    targetLanguage: 'zh-Hans',
+    format: 'json',
+  })
+
+  assert.deepEqual(JSON.parse(result.text), { message: value })
+  assert.ok(fragments.length > 2)
+  for (const fragment of fragments) assert.ok(fragment.length <= 12)
+
+  const boundaries = new Set()
+  let offset = 0
+  for (const fragment of fragments.slice(0, -1)) {
+    offset += fragment.length
+    boundaries.add(offset)
+  }
+  const graphemeBoundaries = new Set([0])
+  for (const item of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(value)) {
+    graphemeBoundaries.add(item.index + item.segment.length)
+  }
+  for (const boundary of boundaries) {
+    assert.ok(graphemeBoundaries.has(boundary), `JSON provider fragment boundary ${boundary} must not split a grapheme`)
+  }
+})
