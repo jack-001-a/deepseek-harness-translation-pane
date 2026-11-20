@@ -799,6 +799,32 @@ test('coalescing: identical concurrent demands share one provider call', async (
 
 
 
+
+
+test('coalescing: one caller cancelling does not abort another caller', async (t) => {
+  let calls = 0
+  mockFetch(async () => {
+    calls += 1
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    return jsonResponse(bingPayload('shared result'))
+  }, t)
+
+  const h = harness()
+  const controller = new AbortController()
+  const first = h.service.translateRequest(
+    { text: 'shared demand', targetLanguage: 'en' },
+    controller.signal,
+  )
+  const second = h.service.translate({ text: 'shared demand', targetLanguage: 'en' })
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  controller.abort(new Error('one panel closed'))
+
+  await assert.rejects(first, (error) => error.message === 'one panel closed')
+  const result = await second
+  assert.equal(result.text, 'shared result')
+  assert.equal(calls, 1, 'the remaining waiter must keep the shared provider call alive')
+})
+
 test('coalescing: a new caller does not join work abandoned by every prior caller', async (t) => {
   let calls = 0
   mockFetch(async (_url, init) => {
