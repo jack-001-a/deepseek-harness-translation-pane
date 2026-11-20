@@ -766,6 +766,9 @@ export class TranslationPaneService {
     const started = Date.now()
     // Cancellation applies to every path, including empty input and cache hits.
     if (signal?.aborted) throw this.abortReason(signal)
+    // A disposed service must reject even if a caller races a new request
+    // against unload; no work may start after its lifetime has ended.
+    if (this.lifetime.signal.aborted) throw this.abortReason(this.lifetime.signal)
     const spec = this.parseRequest(request)
     if (spec.format === 'text' && spec.text.trim().length === 0) {
       return {
