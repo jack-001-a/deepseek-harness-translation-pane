@@ -1738,3 +1738,33 @@ test('timeout: a request deadline after response headers preserves the structure
   )
   assert.equal(calls, 1, 'an overall request deadline must not fail over to another provider')
 })
+
+
+test('timeout: the shipped translator preserves the request deadline during cancellation', async () => {
+  for (const settle of ['reject', 'resolve']) {
+    const translator = fakeTranslator({
+      translate: (_spec, signal) => new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          if (settle === 'reject') {
+            reject(new DOMException('The operation was aborted.', 'AbortError'))
+          } else {
+            resolve('late translation')
+          }
+        }, { once: true })
+      }),
+    })
+    const h = harness({
+      translator,
+      config: { timeoutMs: 30 },
+    })
+    await assert.rejects(
+      h.service.translate({ text: 'hello', targetLanguage: 'en' }),
+      (error) => {
+        assert.equal(error.code, 'translation-pane/timeout')
+        assert.equal(error.details.timeoutMs, 30)
+        return true
+      },
+    )
+    await h.unload()
+  }
+})
