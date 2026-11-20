@@ -785,6 +785,16 @@ export class TranslationPaneService {
     if (format !== 'text' && format !== 'json') {
       throw new TranslationPaneError(CODE.invalidRequest, 'translationPane: format must be "text" or "json"')
     }
+    // Enforce the raw input bound before parsing JSON: callers can reach the
+    // Host without the panel's client-side counter, and an oversized document
+    // must not consume parser work before it is rejected.
+    if (text.length > this.config.maxTextChars) {
+      throw new TranslationPaneError(
+        CODE.textLimit,
+        `translationPane: text exceeds the ${this.config.maxTextChars}-character limit`,
+        { limit: this.config.maxTextChars, length: text.length },
+      )
+    }
     let jsonTokens
     if (format === 'json') {
       try {
@@ -800,13 +810,6 @@ export class TranslationPaneService {
         CODE.providerUnavailable,
         `translationPane: the ${route} route cannot serve the "${requested}" provider`,
         { provider: requested, route, providers: [...providers] },
-      )
-    }
-    if (text.length > this.config.maxTextChars) {
-      throw new TranslationPaneError(
-        CODE.textLimit,
-        `translationPane: text exceeds the ${this.config.maxTextChars}-character limit`,
-        { limit: this.config.maxTextChars, length: text.length },
       )
     }
     return {
