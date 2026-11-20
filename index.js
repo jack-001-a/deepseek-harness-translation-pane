@@ -883,6 +883,9 @@ export class TranslationPaneService {
     entry.promise = (async () => {
       try {
         const result = await this.run(spec, controller)
+        // Do not publish a result if unload won the race with a fast path
+        // (for example, JSON containing only empty string values).
+        if (this.lifetime.signal.aborted) throw this.abortReason(this.lifetime.signal)
         this.cache.set(key, result)
         return result
       } finally {
