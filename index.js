@@ -1545,7 +1545,10 @@ export class TranslationPaneService {
     }
     let text
     try {
-      text = await translator.translate(resolved, signal)
+      // Detach the service pipeline from a translator that ignores abort and never settles.
+      // The provider's own Promise may remain pending, but this request can release
+      // its workers, deadline, shared entry, and service-owned references promptly.
+      text = await this.race(Promise.resolve(translator.translate(resolved, signal)), signal)
     } catch (error) {
       // A request-wide deadline or caller cancellation is authoritative even
       // when the upstream translator rejects with its own AbortError shape.
