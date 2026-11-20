@@ -1355,6 +1355,20 @@ test('splitter: boundaries preserve combining marks and emoji grapheme clusters'
   }
 })
 
+test('splitter: oversized graphemes fall back to code-point-safe boundaries', () => {
+  // One grapheme exceeds the provider limit. The splitter may separate its
+  // combining marks, but it must never emit half of the emoji surrogate pair.
+  const source = '😀' + '\u0301'.repeat(8) + 'tail'
+  const fragments = splitText(source, 3)
+
+  assert.equal(fragments.join(''), source)
+  for (const fragment of fragments) {
+    assert.ok(fragment.length <= 3)
+    assert.equal(/[\uD800-\uDBFF]$/.test(fragment), false, 'a fragment must not end with a high surrogate')
+    assert.equal(/^[\uDC00-\uDFFF]/.test(fragment), false, 'a fragment must not start with a low surrogate')
+  }
+})
+
 test('splitter: a fragment limit smaller than one Unicode code point fails safely', () => {
   assert.throws(() => splitText('😀x', 1), RangeError)
 })
