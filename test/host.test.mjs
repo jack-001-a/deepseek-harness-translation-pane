@@ -1830,3 +1830,24 @@ test('unload: disposed services reject empty, cached, and new demands', async (t
   assert.equal(calls, 1, 'no provider request may start after unload')
   assert.equal(h.service.describe().cacheHits, cacheHits, 'a disposed cache must not serve hits')
 })
+
+
+test('unload: waiters release when a translator ignores abort forever', { timeout: 1000 }, async () => {
+  const h = harness({
+    translator: {
+      maxTextChars: 4000,
+      resolve: (request) => request,
+      translate: () => new Promise(() => {}),
+    },
+  })
+  const pending = h.service.translate({ text: 'never settles', targetLanguage: 'en' })
+  await Promise.resolve()
+  assert.equal(h.service.inflight.size, 1, 'the shared request should be registered')
+  await h.unload()
+
+  await assert.rejects(
+    pending,
+    (error) => error.message === 'translationPane: the service was unloaded',
+  )
+  assert.equal(h.service.inflight.size, 0, 'unload must release the abandoned in-flight entry')
+})
