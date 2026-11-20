@@ -1768,3 +1768,39 @@ test('timeout: the shipped translator preserves the request deadline during canc
     await h.unload()
   }
 })
+
+
+test('cancellation: an abort after error response headers wins over HTTP status', async (t) => {
+  const controller = new AbortController()
+  const reason = new Error('caller left after response headers')
+  mockFetch(async () => {
+    const response = new Response(new ReadableStream({
+      cancel: () => new Promise(() => {}),
+    }), { status: 503 })
+    controller.abort(reason)
+    return response
+  }, t)
+  const h = harness()
+  await assert.rejects(
+    h.service.translateRequest({ text: 'hi', targetLanguage: 'en' }, controller.signal),
+    (error) => error === reason,
+  )
+})
+
+test('response: an oversized stream is rejected without awaiting a stalled cancel hook', async (t) => {
+  mockFetch(async () => new Response(new ReadableStream({
+    start(stream) {
+      stream.enqueue(new Uint8Array(128))
+    },
+    cancel: () => new Promise(() => {}),
+  })), t)
+  const h = harness({ config: { maxResponseBytes: 64, timeoutMs: 1000 } })
+  await assert.rejects(
+    h.service.translate({ text: 'hi', targetLanguage: 'en' }),
+    (error) => {
+      assert.equal(error.code, 'translation-pane/invalid-response')
+      assert.equal(error.details.limit, 64)
+      return true
+    },
+  )
+})
