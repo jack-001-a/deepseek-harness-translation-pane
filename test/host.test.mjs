@@ -1328,6 +1328,37 @@ test('splitter: complete inline syntax tokens stay inside one fragment', () => {
   }
 })
 
+test('splitter: boundaries preserve combining marks and emoji grapheme clusters', () => {
+  const cases = [
+    { source: 'a'.repeat(7) + 'e\\u0301' + 'z'.repeat(20), maxChars: 8 },
+    { source: 'a'.repeat(9) + '👩🏽‍💻' + 'z'.repeat(20), maxChars: 12 },
+  ]
+
+  for (const { source, maxChars } of cases) {
+    const fragments = splitText(source, maxChars)
+    assert.equal(fragments.join(''), source)
+    for (const fragment of fragments) assert.ok(fragment.length <= maxChars)
+
+    const boundaries = new Set()
+    let offset = 0
+    for (const fragment of fragments.slice(0, -1)) {
+      offset += fragment.length
+      boundaries.add(offset)
+    }
+    const graphemeBoundaries = new Set([0])
+    for (const item of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(source)) {
+      graphemeBoundaries.add(item.index + item.segment.length)
+    }
+    for (const boundary of boundaries) {
+      assert.ok(graphemeBoundaries.has(boundary), `fragment boundary ${boundary} must not split a grapheme`)
+    }
+  }
+})
+
+test('splitter: a fragment limit smaller than one Unicode code point fails safely', () => {
+  assert.throws(() => splitText('😀x', 1), RangeError)
+})
+
 test('splitter: mixed-language and RTL text remains lossless around markup', () => {
   const source = [
     'English paragraph with 中文内容 and 日本語.',
