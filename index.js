@@ -319,6 +319,43 @@ function jsonStringValueTokens(source) {
   return tokens
 }
 
+/**
+ * Keep fragment boundaries on grapheme boundaries whenever the complete
+ * grapheme fits. Oversized graphemes may be divided between code points, but
+ * never inside a UTF-16 surrogate pair.
+ * @param text - the remaining source text.
+ * @param boundary - proposed UTF-16 boundary.
+ * @param maxChars - provider fragment limit.
+ * @returns a safe local boundary.
+ */
+function adjustGraphemeBoundary(text, boundary, maxChars) {
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+  for (const item of segmenter.segment(text)) {
+    const start = item.index
+    const end = start + item.segment.length
+    if (start < boundary && end > boundary) {
+      if (start > 0) return start
+      if (end <= maxChars) return end
+
+      // This one grapheme is larger than the whole fragment budget. Preserve
+      // code points even though keeping the grapheme intact is impossible.
+      let safe = 0
+      while (safe < text.length) {
+        const point = text.codePointAt(safe)
+        const width = point > 0xffff ? 2 : 1
+        if (safe + width > maxChars) break
+        safe += width
+        if (safe >= boundary) break
+      }
+      if (safe === 0) {
+        throw new RangeError('splitText: maxChars is smaller than one Unicode code point')
+      }
+      return safe
+    }
+  }
+  return boundary
+}
+
 export function splitText(text, maxChars) {
   if (maxChars < 1) throw new RangeError('splitText: maxChars must be positive')
   if (text.length <= maxChars) return [text]
@@ -344,14 +381,9 @@ export function splitText(text, maxChars) {
     }
     let boundary = cut < 0 ? maxChars : cut + size
     boundary = protectBoundary(ranges, offset, boundary, maxChars)
-    // Never leave one half of a surrogate pair at either edge of a request.
-    if (boundary < rest.length) {
-      const last = rest.charCodeAt(boundary - 1)
-      if (last >= 0xd800 && last <= 0xdbff) boundary -= 1
-    }
-    // A one-unit fragment is the only way past a lone leading surrogate; the
-    // round trip still holds even then.
-    if (boundary < 1) boundary = maxChars
+    // Keep a complete grapheme together when it fits. If a single grapheme
+    // exceeds the provider limit, fall back to code-point-safe boundaries.
+    boundary = adjustGraphemeBoundary(rest, boundary, maxChars)
     fragments.push(rest.slice(0, boundary))
     rest = rest.slice(boundary)
     offset += boundary
