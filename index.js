@@ -922,7 +922,14 @@ export class TranslationPaneService {
       }
     }
     try {
-      const result = await this.race(entry.promise, signal)
+      // A translator implementation may ignore AbortSignal and never settle.
+      // Race each waiter against service lifetime as well as caller lifetime,
+      // so unload releases callers even when underlying work is uncooperative.
+      const waiterSignal =
+        signal === undefined || signal === null
+          ? this.lifetime.signal
+          : AbortSignal.any([signal, this.lifetime.signal])
+      const result = await this.race(entry.promise, waiterSignal)
       return { ...result, cached: false, durationMs: Date.now() - started }
     } finally {
       release()
