@@ -1517,6 +1517,7 @@ test('JSON mode stops dispatching queued values after the first provider failure
 })
 
 
+
 test('JSON mode safely handles escaped keys and values plus translated JSON metacharacters', async (t) => {
   const requests = []
   mockFetch(async (_url, init) => {
@@ -1525,7 +1526,7 @@ test('JSON mode safely handles escaped keys and values plus translated JSON meta
   }, t)
 
   const h = harness()
-  const source = String.raw\`{"k\\"ey":"hello\\nworld","slash":"a\\\\b","unicode":"\\uD83D\\uDE80"}\`
+  const source = String.raw`{"k\"ey":"hello\nworld","slash":"a\\b","unicode":"\uD83D\uDE80"}`
   const result = await h.service.translate({
     text: source,
     targetLanguage: 'zh-Hans',
@@ -1533,7 +1534,7 @@ test('JSON mode safely handles escaped keys and values plus translated JSON meta
   })
 
   assert.deepEqual(requests, ['hello\nworld', 'a\\b', '🚀'])
-  assert.ok(result.text.startsWith(String.raw\`{"k\\"ey":\`), 'escaped object keys must remain byte-for-byte unchanged')
+  assert.ok(result.text.startsWith(String.raw`{"k\"ey":`), 'escaped object keys must remain byte-for-byte unchanged')
   assert.deepEqual(JSON.parse(result.text), {
     'k"ey': '译文 "quoted" \\ path\n🚀',
     slash: '译文 "quoted" \\ path\n🚀',
