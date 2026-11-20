@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { apply, inject } from '../index.js'
+import { apply, inject, TranslationPaneService } from '../index.js'
 
 const harnessRoot = process.env.DSH_HARNESS_ROOT
 const harnessVersion = process.env.DSH_HARNESS_VERSION
@@ -56,9 +56,9 @@ try {
   assert.equal(service.describe().route, 'direct')
   assert.deepEqual(service.describe().providers, ['bing', 'google'])
 
-  // Cordis exposes provided services through a traceable proxy. The Typert
-  // descriptor is intentionally defined on the concrete service prototype.
-  const remote = Object.getPrototypeOf(service)?.[Symbol.for('@deepseek-ai/dsh-typert-protocol/remote-methods')]
+  // The descriptor is attached to the exported concrete service class; read
+  // it there rather than through Cordis's traceable service proxy.
+  const remote = TranslationPaneService.prototype[Symbol.for('@deepseek-ai/dsh-typert-protocol/remote-methods')]
   assert.equal(remote?.version, 1)
   assert.deepEqual(remote?.methods?.map((entry) => entry.method), ['describe', 'translate'])
 
