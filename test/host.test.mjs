@@ -1586,6 +1586,47 @@ test('translate_text agent tool exposes and forwards JSON format', async (t) => 
   assert.equal(result.text, '{"message":"T:hello"}')
 })
 
+test('dispatch: the first concurrent fragment failure wins and failed work is never cached', async (t) => {
+  const calls = []
+  let failedAttempt = true
+  mockFetch(async (_url, init) => {
+    const fragment = JSON.parse(init.body)[0]
+    calls.push(fragment)
+    if (failedAttempt && fragment.startsWith('a')) {
+      await new Promise((resolve) => setTimeout(resolve, 15))
+      return new Response('bad request', { status: 400 })
+    }
+    if (failedAttempt && fragment.startsWith('b')) {
+      return new Response('rate limited', { status: 429 })
+    }
+    return jsonResponse(bingPayload(`translated:${fragment}`))
+  }, t)
+
+  const h = harness({
+    config: { fragmentChars: 50, maxConcurrency: 2, failover: false, maxRetries: 0 },
+  })
+  const source = JSON.stringify({ a: 'a'.repeat(50), b: 'b'.repeat(50) })
+
+  await assert.rejects(
+    h.service.translate({ text: source, targetLanguage: 'en', format: 'json' }),
+    (error) => {
+      assert.equal(error.code, 'translation-pane/rate-limited')
+      assert.match(error.message, /HTTP 429/)
+      return true
+    },
+  )
+  assert.equal(calls.length, 2, 'both already-claimed fragments may settle, but no queued work starts')
+
+  failedAttempt = false
+  const result = await h.service.translate({ text: source, targetLanguage: 'en', format: 'json' })
+  assert.deepEqual(JSON.parse(result.text), {
+    a: `translated:${'a'.repeat(50)}`,
+    b: `translated:${'b'.repeat(50)}`,
+  })
+  assert.equal(calls.length, 4, 'the failed partial demand must not have populated the cache')
+  assert.equal(result.cached, false)
+})
+
 test('JSON mode stops dispatching queued values after the first provider failure', async (t) => {
   const calls = []
   mockFetch(async (_url, init) => {
