@@ -1804,3 +1804,29 @@ test('response: an oversized stream is rejected without awaiting a stalled cance
     },
   )
 })
+
+
+test('unload: disposed services reject empty, cached, and new demands', async (t) => {
+  let calls = 0
+  mockFetch(async () => {
+    calls += 1
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+  const h = harness()
+  await h.service.translate({ text: 'cached', targetLanguage: 'en' })
+  const cacheHits = h.service.describe().cacheHits
+  await h.unload()
+
+  for (const request of [
+    { text: '', targetLanguage: 'en' },
+    { text: 'cached', targetLanguage: 'en' },
+    { text: 'new demand', targetLanguage: 'en' },
+  ]) {
+    await assert.rejects(
+      h.service.translateRequest(request),
+      (error) => error.message === 'translationPane: the service was unloaded',
+    )
+  }
+  assert.equal(calls, 1, 'no provider request may start after unload')
+  assert.equal(h.service.describe().cacheHits, cacheHits, 'a disposed cache must not serve hits')
+})
