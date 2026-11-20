@@ -1370,6 +1370,21 @@ test('JSON mode translates only string values and preserves the original documen
   assert.deepEqual(requests.sort(), ['Ada', 'hello', 'one', 'world'])
 })
 
+test('JSON mode rejects oversized input before attempting JSON parsing', async (t) => {
+  let calls = 0
+  mockFetch(async () => {
+    calls += 1
+    return jsonResponse(bingPayload('unexpected'))
+  }, t)
+  const h = harness({ config: { maxTextChars: 32 } })
+
+  await assert.rejects(
+    h.service.translate({ text: '{' + 'x'.repeat(64), targetLanguage: 'zh-Hans', format: 'json' }),
+    (error) => error.code === 'translation-pane/text-limit',
+  )
+  assert.equal(calls, 0)
+})
+
 test('JSON mode rejects malformed JSON before contacting a provider', async (t) => {
   let calls = 0
   mockFetch(async () => {
