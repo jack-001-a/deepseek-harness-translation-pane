@@ -764,6 +764,8 @@ export class TranslationPaneService {
    */
   async translateRequest(request, signal) {
     const started = Date.now()
+    // Cancellation applies to every path, including empty input and cache hits.
+    if (signal?.aborted) throw this.abortReason(signal)
     const spec = this.parseRequest(request)
     if (spec.format === 'text' && spec.text.trim().length === 0) {
       return {
