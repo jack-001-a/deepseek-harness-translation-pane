@@ -1611,7 +1611,7 @@ test('dispatch: the first concurrent fragment failure wins and failed work is ne
     h.service.translate({ text: source, targetLanguage: 'en', format: 'json' }),
     (error) => {
       assert.equal(error.code, 'translation-pane/rate-limited')
-      assert.match(error.message, /HTTP 429/)
+      assert.equal(error.details.status, 429)
       return true
     },
   )
