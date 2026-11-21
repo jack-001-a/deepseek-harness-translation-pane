@@ -6,6 +6,34 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## Unreleased
 
+## [1.3.0] — 2026-11-21
+
+### Added
+
+- Add opt-in JSON translation mode for the panel and `translate_text` tool. Only
+  JSON string values are sent to the selected provider; object keys, numbers,
+  booleans, null values, nesting, and original whitespace remain unchanged.
+- Add real DeepSeek Harness compatibility checks against pinned 0.2.2-rc.4 and
+  0.2.2-rc.5 revisions.
+
+### Changed
+
+- Disclose external provider processing, the request data sent to Microsoft or
+  Google, and the possibility of cross-provider failover before sensitive text
+  is submitted.
+- Keep inline code, template placeholders, HTML/XML tags, Markdown links,
+  URLs, fences, and Unicode grapheme clusters intact at fragment boundaries
+  whenever they fit within the provider request limit.
+
+### Fixed
+
+- Stop dispatching queued fragments after a provider request fails; allow
+  already-running fragments to settle before returning the failure.
+- Harden cancellation, request coalescing, timeout handling, and service unload
+  so abandoned or late work cannot publish stale translations or cache entries.
+- Reject oversized JSON input before parsing or contacting a provider.
+
+
 ## [1.2.1] — 2026-11-18
 
 ### Fixed
