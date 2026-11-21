@@ -213,13 +213,68 @@ export function providerLanguage(tag, provider) {
 }
 
 /**
+ * Find syntax tokens that should not be divided between provider requests.
+ * Tokens larger than the request limit are deliberately left splittable.
+ * @param text - complete source text.
+ * @returns sorted, non-overlapping source ranges.
+ */
+function protectedTextRanges(text) {
+  const patterns = [
+    /(`+)[^\n]*?\1/g, // inline code spans, including multi-backtick delimiters
+    /^ {0,3}(?:`{3,}|~{3,})[^\n]*(?:\n|$)/gm, // Markdown fence marker lines
+    /\{\{[\s\S]*?\}\}/g, // common template placeholders
+    /\$\{[^}\n]*\}/g, // interpolation placeholders
+    /<\/?[A-Za-z][^>\n]*>/g, // HTML/XML tags
+    /\[[^\]\n]*\]\([^)]+\)/g, // Markdown links
+    /https?:\/\/[^\s<>()]+/g, // URLs
+  ]
+  const ranges = []
+  for (const pattern of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      ranges.push({ start: match.index, end: match.index + match[0].length })
+    }
+  }
+  ranges.sort((a, b) => a.start - b.start || a.end - b.end)
+  const merged = []
+  for (const range of ranges) {
+    const previous = merged.at(-1)
+    if (previous && range.start <= previous.end) {
+      previous.end = Math.max(previous.end, range.end)
+    } else {
+      merged.push({ ...range })
+    }
+  }
+  return merged
+}
+
+/**
+ * Move a proposed fragment boundary out of a protected syntax token when the
+ * complete token fits in one provider request.
+ * @param ranges - protected source ranges, in UTF-16 offsets.
+ * @param offset - current fragment's source offset.
+ * @param boundary - proposed local boundary.
+ * @param maxChars - maximum fragment size.
+ * @returns a local boundary that does not bisect a protected token.
+ */
+function protectBoundary(ranges, offset, boundary, maxChars) {
+  const absolute = offset + boundary
+  const range = ranges.find((item) =>
+    item.start < absolute && item.end > absolute && item.end - item.start <= maxChars,
+  )
+  if (range === undefined) return boundary
+  if (range.start > offset) return range.start - offset
+  if (range.end - offset <= maxChars) return range.end - offset
+  return boundary
+}
+
+/**
  * Split text into request-sized pieces on paragraph, then line, then sentence,
- * then word boundaries.
+ * then word boundaries. Complete inline syntax tokens (code spans, template
+ * placeholders, HTML tags, Markdown links and URLs) are kept in one fragment
+ * whenever the token itself fits the provider limit.
  *
  * The separator always stays with the fragment it closes, so concatenating
- * the fragments reproduces the source exactly: a translated document keeps
- * the structure of the original instead of losing the breaks between its
- * sentences.
+ * the fragments reproduces the source exactly.
  * @param text - source text.
  * @param maxChars - per-fragment limit in UTF-16 code units.
  * @returns the fragments in source order.
@@ -228,7 +283,9 @@ export function splitText(text, maxChars) {
   if (maxChars < 1) throw new RangeError('splitText: maxChars must be positive')
   if (text.length <= maxChars) return [text]
   const fragments = []
+  const ranges = protectedTextRanges(text)
   let rest = text
+  let offset = 0
   // A break earlier than this would produce a run of tiny fragments; the
   // coarse separators are preferred, but only when they still fill the
   // request reasonably well.
@@ -245,25 +302,19 @@ export function splitText(text, maxChars) {
         break
       }
     }
-    if (cut < 0) {
-      // No usable break: cut the request at its limit, which still keeps the
-      // fragments joinable. The boundary must not fall between the two halves
-      // of one code point: a lone UTF-16 surrogate would reach the provider as
-      // a replacement character, so the cut moves back by one instead.
-      let end = maxChars
-      if (end < rest.length) {
-        const last = rest.charCodeAt(end - 1)
-        if (last >= 0xd800 && last <= 0xdbff) end -= 1
-      }
-      // A one-unit fragment is the only way past a lone leading surrogate; the
-      // round trip still holds even then.
-      if (end < 1) end = maxChars
-      fragments.push(rest.slice(0, end))
-      rest = rest.slice(end)
-      continue
+    let boundary = cut < 0 ? maxChars : cut + size
+    boundary = protectBoundary(ranges, offset, boundary, maxChars)
+    // Never leave one half of a surrogate pair at either edge of a request.
+    if (boundary < rest.length) {
+      const last = rest.charCodeAt(boundary - 1)
+      if (last >= 0xd800 && last <= 0xdbff) boundary -= 1
     }
-    fragments.push(rest.slice(0, cut + size))
-    rest = rest.slice(cut + size)
+    // A one-unit fragment is the only way past a lone leading surrogate; the
+    // round trip still holds even then.
+    if (boundary < 1) boundary = maxChars
+    fragments.push(rest.slice(0, boundary))
+    rest = rest.slice(boundary)
+    offset += boundary
   }
   if (rest.length > 0) fragments.push(rest)
   return fragments
@@ -1484,7 +1535,7 @@ export function apply(ctx, config) {
     () =>
       ctx.tools.register({
         name: 'translate_text',
-        description: `Translate text between languages with an anonymous machine-translation endpoint. Use it when the user asks for a translation, or when you need a sentence rendered in another language. Returns only the translation. Text up to ${resolved.maxTextChars} characters is accepted; longer text is split into provider-sized requests and translated in order, so the result keeps the structure of the source. On the direct endpoint route, if one endpoint cannot be reached, another is tried automatically.`,
+        description: `Translate text between languages by sending the submitted source text to the configured machine-translation provider (Microsoft Edge/Bing or Google Translate on the direct route; the configured provider on the shipped-translator route). Tell the user that their text is processed by that external provider before submitting sensitive or confidential content. Use it when the user asks for a translation, or when you need a sentence rendered in another language. Returns only the translation. Text up to ${resolved.maxTextChars} characters is accepted; longer text is split into provider-sized requests and translated in order, so the result keeps the structure of the source. On the direct endpoint route, if one endpoint cannot be reached and failover is enabled, the other provider may receive the same fragment.`,
         parameters: {
           type: 'object',
           additionalProperties: false,
