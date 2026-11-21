@@ -1870,3 +1870,24 @@ test('unload: a late empty-JSON completion cannot populate the cache', async (t)
   )
   assert.equal(h.service.cache.size, 0, 'an unloaded service must not publish a late cache entry')
 })
+
+test('concurrency: a failed fragment prevents queued fragments from being dispatched', async (t) => {
+  const calls = []
+  mockFetch(async (_url, init) => {
+    const fragment = JSON.parse(init.body)[0]
+    calls.push(fragment)
+    if (fragment.startsWith('a')) return new Response('bad request', { status: 400 })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness({
+    config: { fragmentChars: 50, maxConcurrency: 2, failover: false, maxRetries: 0 },
+  })
+  await assert.rejects(
+    h.service.translate({ text: 'a'.repeat(50) + 'b'.repeat(50) + 'c'.repeat(50) + 'd'.repeat(50), targetLanguage: 'en' }),
+    (error) => error.code === 'translation-pane/provider-error',
+  )
+  assert.equal(calls.length, 2, 'only the already-active fragments may reach the provider')
+  assert.deepEqual(calls, ['a'.repeat(50), 'b'.repeat(50)])
+})
