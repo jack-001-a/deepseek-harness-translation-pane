@@ -279,6 +279,83 @@ function protectBoundary(ranges, offset, boundary, maxChars) {
  * @param maxChars - per-fragment limit in UTF-16 code units.
  * @returns the fragments in source order.
  */
+/**
+ * Validate JSON and locate only string-value tokens, never object keys.
+ *
+ * Source offsets let us replace values without reserializing the document:
+ * whitespace, key spelling, numeric notation, booleans, null and nesting
+ * remain unchanged.
+ * @param source - the JSON source text.
+ * @returns string-value tokens in source order.
+ */
+function jsonStringValueTokens(source) {
+  JSON.parse(source)
+  const tokens = []
+  let index = 0
+  while (index < source.length) {
+    if (source[index] !== '"') {
+      index += 1
+      continue
+    }
+    const start = index
+    index += 1
+    while (index < source.length) {
+      const character = source[index]
+      if (character === '\\') {
+        index += 2
+        continue
+      }
+      index += 1
+      if (character === '"') break
+    }
+    const end = index
+    let next = end
+    while (next < source.length && /[\t\n\r ]/u.test(source[next])) next += 1
+    if (source[next] !== ':') {
+      const value = JSON.parse(source.slice(start, end))
+      tokens.push({ start, end, value })
+    }
+  }
+  return tokens
+}
+
+/**
+ * Keep fragment boundaries on grapheme boundaries whenever the complete
+ * grapheme fits. Oversized graphemes may be divided between code points, but
+ * never inside a UTF-16 surrogate pair.
+ * @param text - the remaining source text.
+ * @param boundary - proposed UTF-16 boundary.
+ * @param maxChars - provider fragment limit.
+ * @returns a safe local boundary.
+ */
+function adjustGraphemeBoundary(text, boundary, maxChars) {
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+  for (const item of segmenter.segment(text)) {
+    const start = item.index
+    const end = start + item.segment.length
+    if (start < boundary && end > boundary) {
+      if (start > 0) return start
+      if (end <= maxChars) return end
+
+      // This one grapheme is larger than the whole fragment budget. Preserve
+      // code points even though keeping the grapheme intact is impossible.
+      let safe = 0
+      while (safe < text.length) {
+        const point = text.codePointAt(safe)
+        const width = point > 0xffff ? 2 : 1
+        if (safe + width > maxChars) break
+        safe += width
+        if (safe >= boundary) break
+      }
+      if (safe === 0) {
+        throw new RangeError('splitText: maxChars is smaller than one Unicode code point')
+      }
+      return safe
+    }
+  }
+  return boundary
+}
+
 export function splitText(text, maxChars) {
   if (maxChars < 1) throw new RangeError('splitText: maxChars must be positive')
   if (text.length <= maxChars) return [text]
@@ -304,14 +381,9 @@ export function splitText(text, maxChars) {
     }
     let boundary = cut < 0 ? maxChars : cut + size
     boundary = protectBoundary(ranges, offset, boundary, maxChars)
-    // Never leave one half of a surrogate pair at either edge of a request.
-    if (boundary < rest.length) {
-      const last = rest.charCodeAt(boundary - 1)
-      if (last >= 0xd800 && last <= 0xdbff) boundary -= 1
-    }
-    // A one-unit fragment is the only way past a lone leading surrogate; the
-    // round trip still holds even then.
-    if (boundary < 1) boundary = maxChars
+    // Keep a complete grapheme together when it fits. If a single grapheme
+    // exceeds the provider limit, fall back to code-point-safe boundaries.
+    boundary = adjustGraphemeBoundary(rest, boundary, maxChars)
     fragments.push(rest.slice(0, boundary))
     rest = rest.slice(boundary)
     offset += boundary
@@ -669,7 +741,7 @@ export class TranslationPaneService {
    * @param signal - the caller's cancellation; the Gateway injects it.
    * @returns the translation and the facts behind it.
    */
-  async translate(request, text, targetLanguage, sourceLanguage, provider, signal) {
+  async translate(request, text, targetLanguage, sourceLanguage, provider, format, signal) {
     const nested = request !== null && typeof request === 'object' ? request : {}
     const envelope = nested.request !== null && typeof nested.request === 'object' ? nested.request : {}
     return await this.translateRequest(
@@ -678,6 +750,7 @@ export class TranslationPaneService {
         targetLanguage: envelope.targetLanguage ?? nested.targetLanguage ?? targetLanguage,
         sourceLanguage: envelope.sourceLanguage ?? nested.sourceLanguage ?? sourceLanguage,
         provider: envelope.provider ?? nested.provider ?? provider,
+        format: envelope.format ?? nested.format ?? format,
       },
       signal,
     )
@@ -691,8 +764,13 @@ export class TranslationPaneService {
    */
   async translateRequest(request, signal) {
     const started = Date.now()
+    // Cancellation applies to every path, including empty input and cache hits.
+    if (signal?.aborted) throw this.abortReason(signal)
+    // A disposed service must reject even if a caller races a new request
+    // against unload; no work may start after its lifetime has ended.
+    if (this.lifetime.signal.aborted) throw this.abortReason(this.lifetime.signal)
     const spec = this.parseRequest(request)
-    if (spec.text.trim().length === 0) {
+    if (spec.format === 'text' && spec.text.trim().length === 0) {
       return {
         text: '',
         sourceLanguage: spec.sourceLanguage,
@@ -703,7 +781,7 @@ export class TranslationPaneService {
       }
     }
 
-    const key = `${spec.providerKey}|${spec.sourceLanguage}|${spec.targetLanguage}|${spec.text}`
+    const key = `${spec.format}|${spec.providerKey}|${spec.sourceLanguage}|${spec.targetLanguage}|${spec.text}`
     const cached = this.cache.get(key)
     if (cached !== undefined) {
       this.cacheHits += 1
@@ -740,6 +818,28 @@ export class TranslationPaneService {
       typeof source.provider === 'string' && source.provider.trim().length > 0
         ? source.provider.trim()
         : undefined
+    const format = source.format === undefined ? 'text' : source.format
+    if (format !== 'text' && format !== 'json') {
+      throw new TranslationPaneError(CODE.invalidRequest, 'translationPane: format must be "text" or "json"')
+    }
+    // Enforce the raw input bound before parsing JSON: callers can reach the
+    // Host without the panel's client-side counter, and an oversized document
+    // must not consume parser work before it is rejected.
+    if (text.length > this.config.maxTextChars) {
+      throw new TranslationPaneError(
+        CODE.textLimit,
+        `translationPane: text exceeds the ${this.config.maxTextChars}-character limit`,
+        { limit: this.config.maxTextChars, length: text.length },
+      )
+    }
+    let jsonTokens
+    if (format === 'json') {
+      try {
+        jsonTokens = jsonStringValueTokens(text)
+      } catch {
+        throw new TranslationPaneError(CODE.invalidRequest, 'translationPane: JSON mode requires valid JSON text')
+      }
+    }
     const route = this.route()
     const providers = route === 'translator' ? TRANSLATOR_PROVIDERS : DIRECT_PROVIDERS
     if (requested !== undefined && !providers.includes(requested)) {
@@ -749,15 +849,10 @@ export class TranslationPaneService {
         { provider: requested, route, providers: [...providers] },
       )
     }
-    if (text.length > this.config.maxTextChars) {
-      throw new TranslationPaneError(
-        CODE.textLimit,
-        `translationPane: text exceeds the ${this.config.maxTextChars}-character limit`,
-        { limit: this.config.maxTextChars, length: text.length },
-      )
-    }
     return {
       text,
+      format,
+      ...(jsonTokens === undefined ? {} : { jsonTokens }),
       sourceLanguage,
       targetLanguage,
       // The direct route always names a provider; the shipped translator
@@ -788,6 +883,9 @@ export class TranslationPaneService {
     entry.promise = (async () => {
       try {
         const result = await this.run(spec, controller)
+        // Do not publish a result if unload won the race with a fast path
+        // (for example, JSON containing only empty string values).
+        if (this.lifetime.signal.aborted) throw this.abortReason(this.lifetime.signal)
         this.cache.set(key, result)
         return result
       } finally {
@@ -820,10 +918,21 @@ export class TranslationPaneService {
       // anonymous endpoint on a result nobody wants.
       if (entry.waiters <= 0) {
         entry.controller.abort(new Error('translationPane: every caller left the request'))
+        // Do not let a new caller join work that has already been abandoned.
+        // The old promise's finally block is identity-guarded, so it cannot
+        // remove a replacement entry installed for the same key.
+        if (this.inflight.get(entry.key) === entry) this.inflight.delete(entry.key)
       }
     }
     try {
-      const result = await this.race(entry.promise, signal)
+      // A translator implementation may ignore AbortSignal and never settle.
+      // Race each waiter against service lifetime as well as caller lifetime,
+      // so unload releases callers even when underlying work is uncooperative.
+      const waiterSignal =
+        signal === undefined || signal === null
+          ? this.lifetime.signal
+          : AbortSignal.any([signal, this.lifetime.signal])
+      const result = await this.race(entry.promise, waiterSignal)
       return { ...result, cached: false, durationMs: Date.now() - started }
     } finally {
       release()
@@ -877,8 +986,14 @@ export class TranslationPaneService {
     const route = translator === undefined ? 'direct' : 'translator'
     const deadline = this.deadline(controller.signal, this.config.timeoutMs)
     try {
-      const fragments = splitText(spec.text, this.fragmentSize(translator))
-      const results = await this.dispatch(fragments, spec, route, translator, deadline.signal)
+      const fragmentSize = this.fragmentSize(translator)
+      const groups = spec.format === 'json'
+        ? spec.jsonTokens.map((token) => token.value.length === 0 ? [] : splitText(token.value, fragmentSize))
+        : [splitText(spec.text, fragmentSize)]
+      const fragments = groups.flat()
+      const results = fragments.length === 0
+        ? []
+        : await this.dispatch(fragments, spec, route, translator, deadline.signal)
       // The shipped service may resolve a different provider than the caller
       // asked for, and the direct route may fall over to another provider; the
       // providers that actually answered are the ones to report. A long demand
@@ -892,7 +1007,7 @@ export class TranslationPaneService {
             .filter((value) => typeof value === 'string' && value.length > 0),
         ),
       ]
-      const provider = served[0] ?? spec.provider
+      const provider = served[0] ?? (results.length === 0 ? 'none' : spec.provider)
       this.log(
         'debug',
         `translated ${spec.text.length} characters with ${served.join('+') || provider} in ${fragments.length} fragments`,
@@ -904,7 +1019,9 @@ export class TranslationPaneService {
           : undefined
       const requestedProvider = spec.requested ?? spec.provider
       return {
-        text: results.map((entry) => entry.text).join(''),
+        text: spec.format === 'json'
+          ? this.replaceJsonStringValues(spec.text, spec.jsonTokens, groups, results)
+          : results.map((entry) => entry.text).join(''),
         sourceLanguage: spec.sourceLanguage,
         ...(detected === undefined ? {} : { detectedSourceLanguage: detected }),
         targetLanguage: spec.targetLanguage,
@@ -927,6 +1044,32 @@ export class TranslationPaneService {
     } finally {
       deadline.dispose()
     }
+  }
+
+  /**
+   * Replace JSON string values in reverse source order so offsets remain valid.
+   * Object keys and non-string JSON tokens are never sent to a provider.
+   * @param source - the original JSON document.
+   * @param tokens - string-value tokens from the validated source.
+   * @param groups - fragments belonging to each string value.
+   * @param results - translated fragment results in dispatch order.
+   * @returns valid JSON with only string values translated.
+   */
+  replaceJsonStringValues(source, tokens, groups, results) {
+    let cursor = 0
+    const replacements = tokens.map((token, index) => {
+      const count = groups[index].length
+      const translated = results.slice(cursor, cursor + count).map((entry) => entry.text).join('')
+      cursor += count
+      return { ...token, encoded: JSON.stringify(count === 0 ? token.value : translated) }
+    })
+    let output = source
+    for (let index = replacements.length - 1; index >= 0; index -= 1) {
+      const token = replacements[index]
+      output = output.slice(0, token.start) + token.encoded + output.slice(token.end)
+    }
+    JSON.parse(output)
+    return output
   }
 
   /**
@@ -1001,21 +1144,33 @@ export class TranslationPaneService {
   async dispatch(fragments, spec, route, translator, signal) {
     const results = new Array(fragments.length)
     let next = 0
+    let failed = false
+    let failure
     const worker = async () => {
       for (;;) {
+        // Stop claiming queued work after any fragment fails. Workers already
+        // in flight settle before the first failure is rethrown.
+        if (failed) return
         const index = next
         next += 1
         if (index >= fragments.length) return
-        results[index] =
-          route === 'translator'
-            ? await this.translateFragment(translator, spec, fragments[index], signal)
-            : await this.translateDirect(spec, fragments[index], signal)
+        try {
+          results[index] =
+            route === 'translator'
+              ? await this.translateFragment(translator, spec, fragments[index], signal)
+              : await this.translateDirect(spec, fragments[index], signal)
+        } catch (error) {
+          if (!failed) failure = error
+          failed = true
+          return
+        }
       }
     }
     const workers = []
     const count = Math.min(this.config.maxConcurrency, fragments.length)
     for (let index = 0; index < count; index += 1) workers.push(worker())
     await Promise.all(workers)
+    if (failed) throw failure
     return results
   }
 
@@ -1216,7 +1371,14 @@ export class TranslationPaneService {
       clearTimeout(timer)
     }
     if (!response.ok) {
-      await response.body?.cancel?.()
+      // The caller/request deadline remains authoritative after headers arrive.
+      if (signal?.aborted) throw this.abortReason(signal)
+      // Error bodies are irrelevant. Cancellation is best-effort and must not
+      // hold the request open if a stream's underlying cancel hook stalls.
+      try {
+        const cancellation = response.body?.cancel?.()
+        cancellation?.catch?.(() => {})
+      } catch {}
       const status = response.status
       const retryAfterMs = parseRetryAfter(response.headers?.get?.('retry-after'))
       if (status === 429) {
@@ -1245,7 +1407,16 @@ export class TranslationPaneService {
         { provider, status },
       )
     }
-    const body = await this.readBody(response, this.config.maxResponseBytes, provider)
+    let body
+    try {
+      body = await this.readBody(response, this.config.maxResponseBytes, provider)
+    } catch (error) {
+      // Fetch aborts body consumption when its signal fires after headers.
+      // Preserve the request's structured timeout/cancellation reason rather
+      // than leaking the implementation-specific AbortError from the reader.
+      if (signal?.aborted) throw this.abortReason(signal)
+      throw error
+    }
     let payload
     try {
       payload = JSON.parse(body)
@@ -1291,7 +1462,11 @@ export class TranslationPaneService {
         if (chunk.done) break
         bytes += chunk.value.byteLength
         if (bytes > limit) {
-          await reader.cancel()
+          // Reject immediately; a hostile stream may never settle its cancel hook.
+          try {
+            const cancellation = reader.cancel()
+            cancellation?.catch?.(() => {})
+          } catch {}
           throw new TranslationPaneError(
             CODE.invalidResponse,
             `translationPane: the ${provider} response exceeds ${limit} bytes`,
@@ -1370,10 +1545,19 @@ export class TranslationPaneService {
     }
     let text
     try {
-      text = await translator.translate(resolved, signal)
+      // Detach the service pipeline from a translator that ignores abort and never settles.
+      // The provider's own Promise may remain pending, but this request can release
+      // its workers, deadline, shared entry, and service-owned references promptly.
+      text = await this.race(Promise.resolve(translator.translate(resolved, signal)), signal)
     } catch (error) {
+      // A request-wide deadline or caller cancellation is authoritative even
+      // when the upstream translator rejects with its own AbortError shape.
+      if (signal?.aborted) throw this.abortReason(signal)
       throw this.mapTranslatorError(error, spec)
     }
+    // Some translator implementations may settle after receiving abort.
+    // Do not accept a late success after the shared request deadline.
+    if (signal?.aborted) throw this.abortReason(signal)
     if (typeof text !== 'string') {
       throw new TranslationPaneError(
         CODE.invalidResponse,
@@ -1535,7 +1719,7 @@ export function apply(ctx, config) {
     () =>
       ctx.tools.register({
         name: 'translate_text',
-        description: `Translate text between languages by sending the submitted source text to the configured machine-translation provider (Microsoft Edge/Bing or Google Translate on the direct route; the configured provider on the shipped-translator route). Tell the user that their text is processed by that external provider before submitting sensitive or confidential content. Use it when the user asks for a translation, or when you need a sentence rendered in another language. Returns only the translation. Text up to ${resolved.maxTextChars} characters is accepted; longer text is split into provider-sized requests and translated in order, so the result keeps the structure of the source. On the direct endpoint route, if one endpoint cannot be reached and failover is enabled, the other provider may receive the same fragment.`,
+        description: `Translate text between languages by sending the submitted text (or, in JSON mode, only decoded JSON string values) to the configured machine-translation provider (Microsoft Edge/Bing or Google Translate on the direct route; the configured provider on the shipped-translator route). Tell the user that their text is processed by that external provider before submitting sensitive or confidential content. Use it when the user asks for a translation, or when you need a sentence rendered in another language. Returns only the translation. For JSON input, pass format="json" to preserve keys, structure and non-string values while translating string values only. Text up to ${resolved.maxTextChars} characters is accepted; longer text is split into provider-sized requests and translated in order, so the result keeps the structure of the source. On the direct endpoint route, if one endpoint cannot be reached and failover is enabled, the other provider may receive the same fragment.`,
         parameters: {
           type: 'object',
           additionalProperties: false,
@@ -1552,6 +1736,11 @@ export function apply(ctx, config) {
             sourceLanguage: {
               type: 'string',
               description: 'Source language tag; omit or pass "auto" to detect it.',
+            },
+            format: {
+              type: 'string',
+              enum: ['text', 'json'],
+              description: 'Use "json" to preserve JSON keys, nesting, whitespace and non-string values while translating only string values. Defaults to "text".',
             },
           },
           required: ['text', 'targetLanguage'],
@@ -1583,6 +1772,7 @@ export function apply(ctx, config) {
               text: args.text,
               targetLanguage: args.targetLanguage,
               sourceLanguage: args.sourceLanguage,
+              format: args.format,
             },
             exec.signal,
           )

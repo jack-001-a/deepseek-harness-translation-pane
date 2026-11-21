@@ -41,6 +41,10 @@ window.__ModuleLoader__.load({
       'field.source': 'Source',
       'field.target': 'Target',
       'field.service': 'Service',
+      'field.format': 'Format',
+      'format.text': 'Plain text',
+      'format.json': 'JSON values only',
+      'note.json': 'JSON mode preserves keys, nesting, whitespace, and non-string values. Only string values are sent to the translation provider.',
       'label.source': 'Source text',
       'label.result': 'Translation',
       'placeholder.source': 'Type or paste the text to translate.',
@@ -115,6 +119,10 @@ window.__ModuleLoader__.load({
       'field.source': '源语言',
       'field.target': '目标语言',
       'field.service': '翻译服务',
+      'field.format': '内容格式',
+      'format.text': '普通文本',
+      'format.json': '仅翻译 JSON 字符串值',
+      'note.json': 'JSON 模式会保留键名、层级、空白格式及非字符串值，只会将字符串值发送给翻译服务。',
       'label.source': '原文',
       'label.result': '译文',
       'placeholder.source': '输入或粘贴要翻译的文本。',
@@ -633,6 +641,7 @@ window.__ModuleLoader__.load({
           source: `${base}-source`,
           target: `${base}-target`,
           service: `${base}-service`,
+          format: `${base}-format`,
           counter: `${base}-counter`,
           hint: `${base}-hint`,
           note: `${base}-note`,
@@ -649,6 +658,7 @@ window.__ModuleLoader__.load({
         const saved = readPreferences().provider
         return PROVIDER_CATALOG.some((entry) => entry.id === saved) ? saved : 'bing'
       })
+      const [format, setFormat] = React.useState(() => readPreferences().format === 'json' ? 'json' : 'text')
       const [source, setSource] = React.useState('')
       const [output, setOutput] = React.useState('')
       const [pending, setPending] = React.useState(false)
@@ -757,8 +767,8 @@ window.__ModuleLoader__.load({
       }, [host.providers, provider])
 
       React.useEffect(() => {
-        writePreferences({ sourceLanguage, targetLanguage, provider })
-      }, [sourceLanguage, targetLanguage, provider])
+        writePreferences({ sourceLanguage, targetLanguage, provider, format })
+      }, [sourceLanguage, targetLanguage, provider, format])
 
       React.useEffect(
         () => () => {
@@ -909,6 +919,7 @@ window.__ModuleLoader__.load({
               sourceLanguage,
               targetLanguage,
               provider,
+              format,
             },
             controller.signal,
           )
@@ -955,7 +966,7 @@ window.__ModuleLoader__.load({
             setPending(false)
           }
         }
-      }, [describeHost, pending, provider, source, sourceLanguage, t, targetLanguage])
+      }, [describeHost, format, pending, provider, source, sourceLanguage, t, targetLanguage])
 
       /**
        * Abandon the running request and leave the panel in a clean state.
@@ -1153,7 +1164,22 @@ window.__ModuleLoader__.load({
             onChange: setProvider,
             renderOption: renderLanguage,
           }),
+          h(Field, {
+            id: ids.format,
+            label: t('field.format'),
+            value: format,
+            options: [
+              { id: 'text', label: t('format.text') },
+              { id: 'json', label: t('format.json') },
+            ],
+            disabled: pending,
+            onChange: setFormat,
+            renderOption: (option) => option.label,
+          }),
         ),
+        format === 'json'
+          ? h('p', { className: 'dshTr-note', role: 'note' }, t('note.json'))
+          : null,
         notice === null
           ? null
           : h('p', { className: 'dshTr-notice', role: 'status' }, notice),

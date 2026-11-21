@@ -747,6 +747,28 @@ test('cache: an identical demand is served from the cache', async (t) => {
   assert.equal(described.cacheEntries, 1)
 })
 
+
+
+test('cache: an already-aborted caller cannot receive a cached result', async (t) => {
+  let calls = 0
+  mockFetch(async () => {
+    calls += 1
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness()
+  await h.service.translate({ text: 'hi', targetLanguage: 'en' })
+  const controller = new AbortController()
+  controller.abort(new Error('the caller no longer wants this result'))
+
+  await assert.rejects(
+    h.service.translateRequest({ text: 'hi', targetLanguage: 'en' }, controller.signal),
+    (error) => error.message === 'the caller no longer wants this result',
+  )
+  assert.equal(calls, 1, 'an aborted cache hit must not reach the provider')
+  assert.equal(h.service.describe().cacheHits, 0, 'an aborted demand must not be counted as a cache hit')
+})
+
 test('cache: the cache is bounded', async (t) => {
   mockFetch(async (_url, init) => jsonResponse(bingPayload(JSON.parse(init.body)[0])), t)
   const h = harness({ config: { cacheSize: 2 } })
@@ -773,6 +795,62 @@ test('coalescing: identical concurrent demands share one provider call', async (
   assert.equal(calls, 1, 'one network call must serve both callers')
   assert.equal(first.text, 'ok')
   assert.equal(second.text, 'ok')
+})
+
+
+
+
+
+test('coalescing: one caller cancelling does not abort another caller', async (t) => {
+  let calls = 0
+  mockFetch(async () => {
+    calls += 1
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    return jsonResponse(bingPayload('shared result'))
+  }, t)
+
+  const h = harness()
+  const controller = new AbortController()
+  const first = h.service.translateRequest(
+    { text: 'shared demand', targetLanguage: 'en' },
+    controller.signal,
+  )
+  const second = h.service.translate({ text: 'shared demand', targetLanguage: 'en' })
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  controller.abort(new Error('one panel closed'))
+
+  await assert.rejects(first, (error) => error.message === 'one panel closed')
+  const result = await second
+  assert.equal(result.text, 'shared result')
+  assert.equal(calls, 1, 'the remaining waiter must keep the shared provider call alive')
+})
+
+test('coalescing: a new caller does not join work abandoned by every prior caller', async (t) => {
+  let calls = 0
+  mockFetch(async (_url, init) => {
+    calls += 1
+    if (calls === 1) {
+      return await new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true })
+      })
+    }
+    return jsonResponse(bingPayload('fresh result'))
+  }, t)
+
+  const h = harness()
+  const controller = new AbortController()
+  const abandoned = h.service.translateRequest(
+    { text: 'same demand', targetLanguage: 'en' },
+    controller.signal,
+  )
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  controller.abort(new Error('the only caller left'))
+  await assert.rejects(abandoned, (error) => error.message === 'the only caller left')
+
+  const fresh = await h.service.translate({ text: 'same demand', targetLanguage: 'en' })
+  assert.equal(fresh.text, 'fresh result')
+  assert.equal(calls, 2, 'the new caller must start fresh provider work')
+  assert.equal(fresh.cached, false)
 })
 
 test('rate limit: an exhausted bucket refuses the request', async (t) => {
@@ -1328,6 +1406,51 @@ test('splitter: complete inline syntax tokens stay inside one fragment', () => {
   }
 })
 
+test('splitter: boundaries preserve combining marks and emoji grapheme clusters', () => {
+  const cases = [
+    { source: 'a'.repeat(7) + 'é' + 'z'.repeat(20), maxChars: 8 },
+    { source: 'a'.repeat(9) + '👩🏽‍💻' + 'z'.repeat(20), maxChars: 12 },
+  ]
+
+  for (const { source, maxChars } of cases) {
+    const fragments = splitText(source, maxChars)
+    assert.equal(fragments.join(''), source)
+    for (const fragment of fragments) assert.ok(fragment.length <= maxChars)
+
+    const boundaries = new Set()
+    let offset = 0
+    for (const fragment of fragments.slice(0, -1)) {
+      offset += fragment.length
+      boundaries.add(offset)
+    }
+    const graphemeBoundaries = new Set([0])
+    for (const item of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(source)) {
+      graphemeBoundaries.add(item.index + item.segment.length)
+    }
+    for (const boundary of boundaries) {
+      assert.ok(graphemeBoundaries.has(boundary), `fragment boundary ${boundary} must not split a grapheme`)
+    }
+  }
+})
+
+test('splitter: oversized graphemes fall back to code-point-safe boundaries', () => {
+  // One grapheme exceeds the provider limit. The splitter may separate its
+  // combining marks, but it must never emit half of the emoji surrogate pair.
+  const source = '😀' + '\u0301'.repeat(8) + 'tail'
+  const fragments = splitText(source, 3)
+
+  assert.equal(fragments.join(''), source)
+  for (const fragment of fragments) {
+    assert.ok(fragment.length <= 3)
+    assert.equal(/[\uD800-\uDBFF]$/.test(fragment), false, 'a fragment must not end with a high surrogate')
+    assert.equal(/^[\uDC00-\uDFFF]/.test(fragment), false, 'a fragment must not start with a low surrogate')
+  }
+})
+
+test('splitter: a fragment limit smaller than one Unicode code point fails safely', () => {
+  assert.throws(() => splitText('😀x', 1), RangeError)
+})
+
 test('splitter: mixed-language and RTL text remains lossless around markup', () => {
   const source = [
     'English paragraph with 中文内容 and 日本語.',
@@ -1342,4 +1465,408 @@ test('splitter: mixed-language and RTL text remains lossless around markup', () 
   for (const fragment of fragments) {
     assert.ok(fragment.length <= 48)
   }
+})
+
+test('JSON mode translates only string values and preserves the original document layout', async (t) => {
+  const requests = []
+  mockFetch(async (_url, init) => {
+    const source = JSON.parse(init.body)[0]
+    requests.push(source)
+    return jsonResponse(bingPayload(`translated:${source}`))
+  }, t)
+
+  const h = harness()
+  const source = '{\n  "message": "hello",\n  "nested": { "label": "world", "count": 2, "enabled": true, "empty": "" },\n  "items": ["one", null, 3, {"name": "Ada"}]\n}'
+  const result = await h.service.translate({
+    text: source,
+    targetLanguage: 'zh-Hans',
+    format: 'json',
+  })
+
+  const expected = '{\n  "message": "translated:hello",\n  "nested": { "label": "translated:world", "count": 2, "enabled": true, "empty": "" },\n  "items": ["translated:one", null, 3, {"name": "translated:Ada"}]\n}'
+  assert.equal(result.text, expected)
+  assert.deepEqual(JSON.parse(result.text), {
+    message: 'translated:hello',
+    nested: { label: 'translated:world', count: 2, enabled: true, empty: '' },
+    items: ['translated:one', null, 3, { name: 'translated:Ada' }],
+  })
+  assert.deepEqual(requests.sort(), ['Ada', 'hello', 'one', 'world'])
+})
+
+test('JSON mode rejects oversized input before attempting JSON parsing', async (t) => {
+  let calls = 0
+  mockFetch(async () => {
+    calls += 1
+    return jsonResponse(bingPayload('unexpected'))
+  }, t)
+  const h = harness({ config: { maxTextChars: 32 } })
+
+  await assert.rejects(
+    h.service.translate({ text: '{' + 'x'.repeat(64), targetLanguage: 'zh-Hans', format: 'json' }),
+    (error) => error.code === 'translation-pane/text-limit',
+  )
+  assert.equal(calls, 0)
+})
+
+test('JSON mode rejects malformed JSON before contacting a provider', async (t) => {
+  let calls = 0
+  mockFetch(async () => {
+    calls += 1
+    return jsonResponse(bingPayload('unexpected'))
+  }, t)
+  const h = harness()
+
+  await assert.rejects(
+    h.service.translate({ text: '{"label": "unterminated}', targetLanguage: 'zh-Hans', format: 'json' }),
+    (error) => error.code === 'translation-pane/invalid-request',
+  )
+  assert.equal(calls, 0)
+})
+
+test('JSON mode splits long string values and rejoins them without changing JSON structure', async (t) => {
+  const bodies = []
+  mockFetch(async (_url, init) => {
+    const fragment = JSON.parse(init.body)[0]
+    bodies.push(fragment)
+    return jsonResponse(bingPayload(fragment.toUpperCase()))
+  }, t)
+  const h = harness({ config: { fragmentChars: 100 } })
+  const value = 'a'.repeat(60) + '\n\n' + 'b'.repeat(60)
+  const source = `{"keep":42,"text":${JSON.stringify(value)},"flag":false}`
+  const result = await h.service.translate({ text: source, targetLanguage: 'zh-Hans', format: 'json' })
+
+  assert.equal(bodies.length, 2)
+  assert.equal(bodies.join(''), value)
+  assert.deepEqual(JSON.parse(result.text), { keep: 42, text: value.toUpperCase(), flag: false })
+})
+
+test('JSON mode leaves documents without string values unchanged and makes no provider request', async (t) => {
+  let calls = 0
+  mockFetch(async () => {
+    calls += 1
+    return jsonResponse(bingPayload('unexpected'))
+  }, t)
+  const h = harness()
+  const source = '{ "count": 1, "enabled": false, "value": null, "items": [2, true] }'
+  const result = await h.service.translate({ text: source, targetLanguage: 'zh-Hans', format: 'json' })
+
+  assert.equal(result.text, source)
+  assert.equal(result.provider, 'none')
+  assert.equal(calls, 0)
+})
+
+test('format is part of the cache key and defaults to text', async (t) => {
+  const bodies = []
+  mockFetch(async (_url, init) => {
+    const fragment = JSON.parse(init.body)[0]
+    bodies.push(fragment)
+    return jsonResponse(bingPayload(`T:${fragment}`))
+  }, t)
+  const h = harness()
+  const source = '{"label":"hello"}'
+
+  const textResult = await h.service.translate({ text: source, targetLanguage: 'zh-Hans' })
+  const jsonResult = await h.service.translate({ text: source, targetLanguage: 'zh-Hans', format: 'json' })
+
+  assert.equal(textResult.text, `T:${source}`)
+  assert.equal(jsonResult.text, '{"label":"T:hello"}')
+  assert.deepEqual(bodies, [source, 'hello'])
+})
+
+test('translate_text agent tool exposes and forwards JSON format', async (t) => {
+  mockFetch(async (_url, init) => jsonResponse(bingPayload(`T:${JSON.parse(init.body)[0]}`)), t)
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+
+  assert.deepEqual(tool.parameters.properties.format.enum, ['text', 'json'])
+  const result = await tool.execute(
+    { text: '{"message":"hello"}', targetLanguage: 'zh-Hans', format: 'json' },
+    { signal: new AbortController().signal },
+  )
+  assert.equal(result.text, '{"message":"T:hello"}')
+})
+
+test('dispatch: the first concurrent fragment failure wins and failed work is never cached', async (t) => {
+  const calls = []
+  let failedAttempt = true
+  mockFetch(async (_url, init) => {
+    const fragment = JSON.parse(init.body)[0]
+    calls.push(fragment)
+    if (failedAttempt && fragment.startsWith('a')) {
+      await new Promise((resolve) => setTimeout(resolve, 15))
+      return new Response('bad request', { status: 400 })
+    }
+    if (failedAttempt && fragment.startsWith('b')) {
+      return new Response('rate limited', { status: 429 })
+    }
+    return jsonResponse(bingPayload(`translated:${fragment}`))
+  }, t)
+
+  const h = harness({
+    config: { fragmentChars: 50, maxConcurrency: 2, failover: false, maxRetries: 0 },
+  })
+  const source = JSON.stringify({ a: 'a'.repeat(50), b: 'b'.repeat(50) })
+
+  await assert.rejects(
+    h.service.translate({ text: source, targetLanguage: 'en', format: 'json' }),
+    (error) => {
+      assert.equal(error.code, 'translation-pane/rate-limited')
+      assert.equal(error.details.status, 429)
+      return true
+    },
+  )
+  assert.equal(calls.length, 2, 'both already-claimed fragments may settle, but no queued work starts')
+
+  failedAttempt = false
+  const result = await h.service.translate({ text: source, targetLanguage: 'en', format: 'json' })
+  assert.deepEqual(JSON.parse(result.text), {
+    a: `translated:${'a'.repeat(50)}`,
+    b: `translated:${'b'.repeat(50)}`,
+  })
+  assert.equal(calls.length, 4, 'the failed partial demand must not have populated the cache')
+  assert.equal(result.cached, false)
+})
+
+test('JSON mode stops dispatching queued values after the first provider failure', async (t) => {
+  const calls = []
+  mockFetch(async (_url, init) => {
+    const fragment = JSON.parse(init.body)[0]
+    calls.push(fragment)
+    if (fragment.startsWith('a')) return new Response('bad request', { status: 400 })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness({
+    config: { fragmentChars: 50, maxConcurrency: 2, failover: false, maxRetries: 0 },
+  })
+  const source = JSON.stringify({ a: 'a'.repeat(50), b: 'b'.repeat(50), c: 'c'.repeat(50), d: 'd'.repeat(50) })
+  await assert.rejects(
+    h.service.translate({ text: source, targetLanguage: 'en', format: 'json' }),
+    (error) => error.code === 'translation-pane/provider-error',
+  )
+  assert.equal(calls.length, 2)
+  assert.deepEqual(calls, ['a'.repeat(50), 'b'.repeat(50)])
+})
+
+
+
+test('JSON mode safely handles escaped keys and values plus translated JSON metacharacters', async (t) => {
+  const requests = []
+  mockFetch(async (_url, init) => {
+    requests.push(JSON.parse(init.body)[0])
+    return jsonResponse(bingPayload('译文 "quoted" \\ path\n🚀'))
+  }, t)
+
+  const h = harness()
+  const source = String.raw`{"k\"ey":"hello\nworld","slash":"a\\b","unicode":"\uD83D\uDE80"}`
+  const result = await h.service.translate({
+    text: source,
+    targetLanguage: 'zh-Hans',
+    format: 'json',
+  })
+
+  assert.deepEqual(requests, ['hello\nworld', 'a\\b', '🚀'])
+  assert.ok(result.text.startsWith(String.raw`{"k\"ey":`), 'escaped object keys must remain byte-for-byte unchanged')
+  assert.deepEqual(JSON.parse(result.text), {
+    'k"ey': '译文 "quoted" \\ path\n🚀',
+    slash: '译文 "quoted" \\ path\n🚀',
+    unicode: '译文 "quoted" \\ path\n🚀',
+  })
+})
+
+
+test('JSON mode keeps grapheme clusters intact across provider fragment boundaries', async (t) => {
+  const fragments = []
+  mockFetch(async (_url, init) => {
+    const fragment = JSON.parse(init.body)[0]
+    fragments.push(fragment)
+    return jsonResponse(bingPayload(fragment))
+  }, t)
+
+  const h = harness({ config: { fragmentChars: 12 } })
+  const value = 'a'.repeat(7) + 'e\\u0301' + 'z'.repeat(10) + 'x'.repeat(9) + '👩🏽‍💻' + 'q'.repeat(20)
+  const source = JSON.stringify({ message: value })
+  const result = await h.service.translate({
+    text: source,
+    targetLanguage: 'zh-Hans',
+    format: 'json',
+  })
+
+  assert.deepEqual(JSON.parse(result.text), { message: value })
+  assert.ok(fragments.length > 2)
+  for (const fragment of fragments) assert.ok(fragment.length <= 12)
+
+  const boundaries = new Set()
+  let offset = 0
+  for (const fragment of fragments.slice(0, -1)) {
+    offset += fragment.length
+    boundaries.add(offset)
+  }
+  const graphemeBoundaries = new Set([0])
+  for (const item of new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(value)) {
+    graphemeBoundaries.add(item.index + item.segment.length)
+  }
+  for (const boundary of boundaries) {
+    assert.ok(graphemeBoundaries.has(boundary), `JSON provider fragment boundary ${boundary} must not split a grapheme`)
+  }
+})
+
+
+test('timeout: a request deadline after response headers preserves the structured timeout error', async (t) => {
+  let calls = 0
+  mockFetch(async (_url, init) => {
+    calls += 1
+    const body = new ReadableStream({
+      start(controller) {
+        init.signal.addEventListener('abort', () => {
+          controller.error(new DOMException('The operation was aborted.', 'AbortError'))
+        }, { once: true })
+      },
+    })
+    return new Response(body)
+  }, t)
+
+  const h = harness({ config: { timeoutMs: 30, attemptTimeoutMs: 1000 } })
+  await assert.rejects(
+    h.service.translate({ text: 'hello', targetLanguage: 'en', provider: 'google' }),
+    (error) => {
+      assert.equal(error.code, 'translation-pane/timeout')
+      assert.equal(error.details.timeoutMs, 30)
+      return true
+    },
+  )
+  assert.equal(calls, 1, 'an overall request deadline must not fail over to another provider')
+})
+
+
+test('timeout: the shipped translator preserves the request deadline during cancellation', async () => {
+  for (const settle of ['reject', 'resolve']) {
+    const translator = fakeTranslator({
+      translate: (_spec, signal) => new Promise((resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          if (settle === 'reject') {
+            reject(new DOMException('The operation was aborted.', 'AbortError'))
+          } else {
+            resolve('late translation')
+          }
+        }, { once: true })
+      }),
+    })
+    const h = harness({
+      translator,
+      config: { timeoutMs: 30 },
+    })
+    await assert.rejects(
+      h.service.translate({ text: 'hello', targetLanguage: 'en' }),
+      (error) => {
+        assert.equal(error.code, 'translation-pane/timeout')
+        assert.equal(error.details.timeoutMs, 30)
+        return true
+      },
+    )
+    await h.unload()
+  }
+})
+
+
+test('cancellation: an abort after error response headers wins over HTTP status', async (t) => {
+  const controller = new AbortController()
+  const reason = new Error('caller left after response headers')
+  mockFetch(async () => {
+    const response = new Response(new ReadableStream({
+      cancel: () => new Promise(() => {}),
+    }), { status: 503 })
+    controller.abort(reason)
+    return response
+  }, t)
+  const h = harness()
+  await assert.rejects(
+    h.service.translateRequest({ text: 'hi', targetLanguage: 'en' }, controller.signal),
+    (error) => error === reason,
+  )
+})
+
+test('response: an oversized stream is rejected without awaiting a stalled cancel hook', async (t) => {
+  mockFetch(async () => new Response(new ReadableStream({
+    start(stream) {
+      stream.enqueue(new Uint8Array(128))
+    },
+    cancel: () => new Promise(() => {}),
+  })), t)
+  const h = harness({ config: { maxResponseBytes: 64, timeoutMs: 1000 } })
+  await assert.rejects(
+    h.service.translate({ text: 'hi', targetLanguage: 'en' }),
+    (error) => {
+      assert.equal(error.code, 'translation-pane/invalid-response')
+      assert.equal(error.details.limit, 64)
+      return true
+    },
+  )
+})
+
+
+test('unload: disposed services reject empty, cached, and new demands', async (t) => {
+  let calls = 0
+  mockFetch(async () => {
+    calls += 1
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+  const h = harness()
+  await h.service.translate({ text: 'cached', targetLanguage: 'en' })
+  const cacheHits = h.service.describe().cacheHits
+  await h.unload()
+
+  for (const request of [
+    { text: '', targetLanguage: 'en' },
+    { text: 'cached', targetLanguage: 'en' },
+    { text: 'new demand', targetLanguage: 'en' },
+  ]) {
+    await assert.rejects(
+      h.service.translateRequest(request),
+      (error) => error.message === 'translationPane: the service was unloaded',
+    )
+  }
+  assert.equal(calls, 1, 'no provider request may start after unload')
+  assert.equal(h.service.describe().cacheHits, cacheHits, 'a disposed cache must not serve hits')
+})
+
+
+test('unload: waiters release when a translator ignores abort forever', { timeout: 1000 }, async () => {
+  const h = harness({
+    translator: {
+      maxTextChars: 4000,
+      resolve: (request) => request,
+      translate: () => new Promise(() => {}),
+    },
+  })
+  const pending = h.service.translate({ text: 'never settles', targetLanguage: 'en' })
+  await Promise.resolve()
+  assert.equal(h.service.inflight.size, 1, 'the shared request should be registered')
+  const [entry] = h.service.inflight.values()
+  assert.ok(entry, 'the shared entry should be observable before unload')
+  await h.unload()
+
+  await assert.rejects(
+    pending,
+    (error) => error.message === 'translationPane: the service was unloaded',
+  )
+  await assert.rejects(
+    entry.promise,
+    (error) => error.message === 'translationPane: the service was unloaded',
+  )
+  assert.equal(h.service.inflight.size, 0, 'unload must release the abandoned in-flight entry')
+})
+
+
+test('unload: a late empty-JSON completion cannot populate the cache', async (t) => {
+  const h = harness()
+  const pending = h.service.translateRequest({ text: '{"empty":""}', format: 'json', targetLanguage: 'en' })
+  await h.unload()
+
+  await assert.rejects(
+    pending,
+    (error) => error.message === 'translationPane: the service was unloaded',
+  )
+  assert.equal(h.service.cache.size, 0, 'an unloaded service must not publish a late cache entry')
 })
