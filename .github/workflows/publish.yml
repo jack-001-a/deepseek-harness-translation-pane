@@ -164,7 +164,7 @@ jobs:
           output="$(npm stage publish 2>&1)"
           status=$?
           set -e
-          printf '%s\\n' "$output"
+          printf '%s\n' "$output"
           if [[ $status -eq 0 ]]; then
             echo "result=staged" >> "$GITHUB_OUTPUT"
             exit 0
@@ -198,9 +198,11 @@ jobs:
           {
             echo "### npm staged release"
             echo
-            echo "- Package: \\`$package\\`"
-            echo "- Version: \\`$version\\`"
+            echo "- Package: \`$package\`"
+            echo "- Version: \`$version\`"
             echo "- Status: submitted to npm Staged Publishing; it is not publicly installable until approved."
-            echo "- Required action: review the staged package in npmjs.com and approve it with 2FA."
+            echo "- Review and approve: https://www.npmjs.com/settings/ybbmm/staged-packages"
+            echo "- CLI check: \`npm stage list $package\`"
+            echo "- Approval requires an npm maintainer account with package write access and 2FA."
           } >> "$GITHUB_STEP_SUMMARY"
 
