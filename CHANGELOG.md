@@ -15,6 +15,13 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Honor valid `Retry-After` delays independently of the local exponential
   back-off ceiling, while keeping the whole-request deadline authoritative.
 
+### Changed
+
+- Extract the byte-bounded translation cache, provider health state and token
+  bucket into a dependency-free Host module with deterministic unit tests.
+- Extract Markdown-aware text splitting and JSON string-value scanning into a
+  dependency-free Host text module; keep the existing `splitText` export.
+
 ## [1.3.0] — 2026-11-21
 
 ### Added
