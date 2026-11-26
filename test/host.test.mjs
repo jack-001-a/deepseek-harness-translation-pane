@@ -719,6 +719,70 @@ test('retry: a 429 is retried and the Retry-After header is honoured', async (t)
   assert.deepEqual(delays, [1000], 'the Retry-After hint wins over the back-off')
 })
 
+test('retry: malformed Retry-After values use bounded exponential back-off', async (t) => {
+  let retryAfter = '-1'
+  let attempts = 0
+  mockFetch(async () => {
+    attempts += 1
+    if (attempts === 1) {
+      return jsonResponse({}, { status: 429, headers: { 'retry-after': retryAfter } })
+    }
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness({
+    config: { failover: false, maxRetries: 1, retryBaseMs: 100, retryMaxMs: 1000, jitter: () => 1 },
+  })
+  const delays = []
+  h.service.sleep = async (ms) => {
+    delays.push(ms)
+  }
+
+  for (const malformed of ['-1', '1.5', '+2', '1e3', '0x10']) {
+    retryAfter = malformed
+    attempts = 0
+    delays.length = 0
+    const result = await h.service.translate({ text: 'malformed ' + malformed, targetLanguage: 'en' })
+    assert.equal(result.text, 'ok')
+    assert.equal(attempts, 2, 'one retry should be made for ' + malformed)
+    assert.deepEqual(delays, [100], malformed + ' must not be interpreted as a delay or date')
+  }
+})
+
+test('retry: valid HTTP-date forms are honoured as Retry-After values', async (t) => {
+  let retryAfter = 'Wed, 21 Oct 2099 07:28:00 GMT'
+  let attempts = 0
+  mockFetch(async () => {
+    attempts += 1
+    if (attempts === 1) {
+      return jsonResponse({}, { status: 429, headers: { 'retry-after': retryAfter } })
+    }
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness({
+    config: { failover: false, maxRetries: 1, retryBaseMs: 100, retryMaxMs: 5000, jitter: () => 1 },
+  })
+  const delays = []
+  h.service.sleep = async (ms) => {
+    delays.push(ms)
+  }
+
+  for (const [index, date] of [
+    [0, 'Wed, 21 Oct 2099 07:28:00 GMT'],
+    [1, 'Thursday, 21-Oct-49 07:28:00 GMT'],
+    [2, 'Wed Oct 21 07:28:00 2099'],
+  ]) {
+    retryAfter = date
+    attempts = 0
+    delays.length = 0
+    const result = await h.service.translate({ text: 'valid date ' + index, targetLanguage: 'en' })
+    assert.equal(result.text, 'ok')
+    assert.equal(attempts, 2)
+    assert.deepEqual(delays, [5000], date + ' should be capped by retryMaxMs')
+  }
+})
+
 test('retry: the budget is bounded', async (t) => {
   let attempts = 0
   mockFetch(async () => {
