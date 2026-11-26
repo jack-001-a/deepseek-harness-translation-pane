@@ -28,7 +28,7 @@
  */
 import { Buffer } from 'node:buffer'
 import { ProviderHealth, TokenBucket, TranslationCache } from './src/host/runtime-state.js'
-import { jsonStringValueTokens, splitText } from './src/host/text.js'
+import { jsonStringValueTokens, markdownSegments, splitText } from './src/host/text.js'
 export { splitText }
 
 /** Cordis service key and API Gateway wire namespace. */
@@ -475,8 +475,11 @@ export class TranslationPaneService {
         ? source.provider.trim()
         : undefined
     const format = source.format === undefined ? 'text' : source.format
-    if (format !== 'text' && format !== 'json') {
-      throw new TranslationPaneError(CODE.invalidRequest, 'translationPane: format must be "text" or "json"')
+    if (format !== 'text' && format !== 'json' && format !== 'markdown') {
+      throw new TranslationPaneError(
+        CODE.invalidRequest,
+        'translationPane: format must be "text", "json" or "markdown"',
+      )
     }
     // Enforce the raw input bound before parsing JSON: callers can reach the
     // Host without the panel's client-side counter, and an oversized document
@@ -489,12 +492,15 @@ export class TranslationPaneService {
       )
     }
     let jsonTokens
+    let markdownSegmentsValue
     if (format === 'json') {
       try {
         jsonTokens = jsonStringValueTokens(text)
       } catch {
         throw new TranslationPaneError(CODE.invalidRequest, 'translationPane: JSON mode requires valid JSON text')
       }
+    } else if (format === 'markdown') {
+      markdownSegmentsValue = markdownSegments(text)
     }
     const route = this.route()
     const providers = route === 'translator' ? TRANSLATOR_PROVIDERS : DIRECT_PROVIDERS
@@ -509,6 +515,7 @@ export class TranslationPaneService {
       text,
       format,
       ...(jsonTokens === undefined ? {} : { jsonTokens }),
+      ...(markdownSegmentsValue === undefined ? {} : { markdownSegments: markdownSegmentsValue }),
       sourceLanguage,
       targetLanguage,
       // The direct route always names a provider; the shipped translator
@@ -645,7 +652,11 @@ export class TranslationPaneService {
       const fragmentSize = this.fragmentSize(translator)
       const groups = spec.format === 'json'
         ? spec.jsonTokens.map((token) => token.value.length === 0 ? [] : splitText(token.value, fragmentSize))
-        : [splitText(spec.text, fragmentSize)]
+        : spec.format === 'markdown'
+          ? spec.markdownSegments.map((segment) =>
+              segment.translate ? splitText(segment.text, fragmentSize) : [],
+            )
+          : [splitText(spec.text, fragmentSize)]
       const fragments = groups.flat()
       const results = fragments.length === 0
         ? []
@@ -677,7 +688,9 @@ export class TranslationPaneService {
       return {
         text: spec.format === 'json'
           ? this.replaceJsonStringValues(spec.text, spec.jsonTokens, groups, results)
-          : results.map((entry) => entry.text).join(''),
+          : spec.format === 'markdown'
+            ? this.replaceMarkdownSegments(spec.markdownSegments, groups, results)
+            : results.map((entry) => entry.text).join(''),
         sourceLanguage: spec.sourceLanguage,
         ...(detected === undefined ? {} : { detectedSourceLanguage: detected }),
         targetLanguage: spec.targetLanguage,
@@ -700,6 +713,24 @@ export class TranslationPaneService {
     } finally {
       deadline.dispose()
     }
+  }
+
+  /**
+   * Reassemble translated Markdown prose around untouched syntax segments.
+   * @param segments - the original lossless Markdown segmentation.
+   * @param groups - provider fragments for each segment.
+   * @param results - translated fragment results in dispatch order.
+   * @returns Markdown with prose translated and protected spans unchanged.
+   */
+  replaceMarkdownSegments(segments, groups, results) {
+    let cursor = 0
+    return segments.map((segment, index) => {
+      const count = groups[index].length
+      if (count === 0) return segment.text
+      const translated = results.slice(cursor, cursor + count).map((entry) => entry.text).join('')
+      cursor += count
+      return translated
+    }).join('')
   }
 
   /**
@@ -1375,7 +1406,7 @@ export function apply(ctx, config) {
     () =>
       ctx.tools.register({
         name: 'translate_text',
-        description: `Translate text between languages by sending the submitted text (or, in JSON mode, only decoded JSON string values) to the configured machine-translation provider (Microsoft Edge/Bing or Google Translate on the direct route; the configured provider on the shipped-translator route). Tell the user that their text is processed by that external provider before submitting sensitive or confidential content. Use it when the user asks for a translation, or when you need a sentence rendered in another language. Returns only the translation. For JSON input, pass format="json" to preserve keys, structure and non-string values while translating string values only. Text up to ${resolved.maxTextChars} characters is accepted; longer text is split into provider-sized requests and translated in order, so the result keeps the structure of the source. On the direct endpoint route, if one endpoint cannot be reached and failover is enabled, the other provider may receive the same fragment.`,
+        description: `Translate text between languages by sending translatable content to the configured machine-translation provider (Microsoft Edge/Bing or Google Translate on the direct route; the configured provider on the shipped-translator route). Tell the user that their text is processed by that external provider before submitting sensitive or confidential content. Use it when the user asks for a translation, or when you need a sentence rendered in another language. Returns only the translation. For JSON input, pass format="json" to preserve keys, structure and non-string values while translating string values only. For Markdown input, pass format="markdown" to translate prose while preserving fenced/inline code, URLs, link destinations, template placeholders, HTML tags, entities and common Markdown syntax. Text up to ${resolved.maxTextChars} characters is accepted; longer translatable text is split into provider-sized requests and translated in order. On the direct endpoint route, if one endpoint cannot be reached and failover is enabled, the other provider may receive the same fragment.`,
         parameters: {
           type: 'object',
           additionalProperties: false,
@@ -1395,8 +1426,8 @@ export function apply(ctx, config) {
             },
             format: {
               type: 'string',
-              enum: ['text', 'json'],
-              description: 'Use "json" to preserve JSON keys, nesting, whitespace and non-string values while translating only string values. Defaults to "text".',
+              enum: ['text', 'json', 'markdown'],
+              description: 'Use "json" to translate only JSON string values, or "markdown" to translate prose while preserving code, URLs, links, placeholders and common Markdown syntax. Defaults to "text".',
             },
           },
           required: ['text', 'targetLanguage'],
