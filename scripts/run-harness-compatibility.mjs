@@ -60,7 +60,7 @@ try {
   // it there rather than through Cordis's traceable service proxy.
   const remote = TranslationPaneService.prototype['@deepseek-ai/dsh-typert-protocol/remote-methods']
   assert.equal(remote?.version, 1)
-  assert.deepEqual(remote?.methods?.map((entry) => entry.method), ['describe', 'translate'])
+  assert.deepEqual(remote?.methods?.map((entry) => entry.method), ['describe', 'translate', 'setGlossary'])
 
   globalThis.fetch = async (_url, init) => {
     const fragment = JSON.parse(init.body)[0]
