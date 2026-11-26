@@ -296,12 +296,13 @@ test('case-sensitive, substring and whole-word rules are configurable per term',
     { source: 'rapid', target: 'FAST' },
     { source: 'kit', target: '组件', wholeWord: false },
   ])
-  assert.deepEqual(glossarySegments('DeepSeek deepseek API rapid kit', glossary).map((x) => x.text), [
-    'DS deepseek ',
+  assert.deepEqual(glossarySegments('DeepSeek deepseek API rapid toolkit', glossary).map((x) => x.text), [
+    'DS',
+    ' deepseek ',
     '接口',
     ' ',
     'FAST',
-    ' ',
+    ' tool',
     '组件',
   ])
 })
@@ -436,5 +437,5 @@ test('Host applies language-scoped terms only to the matching language pair', as
     targetLanguage: 'fr',
   })
   assert.equal(french.text, 'API WORKS')
-  assert.deepEqual(h.requests, ['API works'])
+  assert.deepEqual(h.requests, [' works'])
 })
