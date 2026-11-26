@@ -12,6 +12,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   dependency-free internal module, with focused unit tests and explicit npm
   package inclusion. Runtime behavior and public APIs remain unchanged.
 
+- Move Markdown-aware text splitting and JSON string-value token scanning into
+  a dependency-free Host text-processing module, retaining the existing
+  `splitText` entrypoint export.
+
 ## [1.3.0] — 2026-11-21
 
 ### Added
