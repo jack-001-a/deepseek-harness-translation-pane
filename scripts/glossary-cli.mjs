@@ -7,14 +7,16 @@ const USAGE = [
   'Usage:',
   '  dsh-translation-glossary validate [file|-] [--format text|json]',
   '  dsh-translation-glossary preview [file|-] (--text <text> | --text-file <path>)',
+  '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json]',
   '  dsh-translation-glossary diff <before-file|-> <after-file|-> [--format text|json]',
   '  dsh-translation-glossary explain <file|-> (--text <text> | --text-file <path>)',
   '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json]',
+  '  dsh-translation-glossary audit <file|-> (--text <text> | --text-file <path>)',
   '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json]',
   '',
   'Use "-" or omit the glossary file to read glossary JSON from stdin.',
   'Exit codes: 0 valid/success, 1 invalid glossary, 2 usage or file error.',
-].join('\n')
+].join('\\n')
 
 class CliError extends Error {}
 
@@ -570,6 +572,168 @@ function explain(args) {
   return 0
 }
 
+ 
+function audit(args) {
+  const { positional, options } = parseOptions(
+    args,
+    new Set(['format', 'text', 'text-file', 'source-language', 'target-language']),
+  )
+  if (positional.length !== 1) throw new CliError('audit requires exactly one glossary file (use "-" for stdin).')
+  if (Object.hasOwn(options, 'text') === Object.hasOwn(options, 'text-file')) {
+    throw new CliError('audit requires exactly one of --text or --text-file.')
+  }
+  const format = options.format ?? 'text'
+  if (!['text', 'json'].includes(format)) throw new CliError('--format must be "text" or "json".')
+
+  const sourceLanguage = options['source-language'] ?? 'auto'
+  const targetLanguage = options['target-language'] ?? 'zh-Hans'
+  const languagePattern = /^(?:auto|[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)$/u
+  if (!languagePattern.test(sourceLanguage)) {
+    throw new CliError('--source-language must be "auto" or a BCP-47 language tag.')
+  }
+  if (!languagePattern.test(targetLanguage)) {
+    throw new CliError('--target-language must be a BCP-47 language tag.')
+  }
+  if (positional[0] === '-' && options['text-file'] === '-') {
+    throw new CliError('Only one audit input may use stdin ("-").')
+  }
+
+  const input = readTextFile(positional[0], 'glossary file')
+  const validation = parseGlossaryImport(input)
+  if (validation.errors.length > 0) {
+    const report = {
+      command: 'audit',
+      valid: false,
+      ...reportValidation(validation),
+    }
+    if (format === 'json') writeJson(report)
+    else {
+      process.stdout.write('Glossary is invalid; audit was not generated.\\n')
+      diagnosticLines(validation.errors, 'ERROR')
+      diagnosticLines(validation.warnings, 'WARN')
+    }
+    return 1
+  }
+
+  const sourceText = Object.hasOwn(options, 'text')
+    ? options.text
+    : readTextFile(options['text-file'], 'source text file')
+  const languages = { sourceLanguage, targetLanguage }
+  const rules = explainMatches(sourceText, validation.entries, languages)
+  const ruleReports = rules.map((rule) => {
+    const applied = rule.matches.filter((match) => match.decision === 'applied')
+    const shadowed = rule.matches.filter((match) => match.decision === 'shadowed')
+    let status
+    let recommendation = null
+    if (applied.length > 0 && shadowed.length > 0) {
+      status = 'partially-active'
+      recommendation = 'Some occurrences are shadowed; review the overlapping rules and priorities.'
+    } else if (applied.length > 0) {
+      status = 'active'
+    } else if (rule.decision === 'shadowed') {
+      status = 'fully-shadowed'
+      recommendation = 'This rule never wins in the supplied sample; review its overlapping rules and priority.'
+    } else if (rule.reason === 'disabled') {
+      status = 'disabled'
+      recommendation = 'This rule is disabled and does not participate in matching.'
+    } else if (rule.reason === 'source-language-mismatch' || rule.reason === 'target-language-mismatch') {
+      status = 'out-of-scope'
+      recommendation = 'The configured language scope does not include this audit language pair.'
+    } else if (rule.reason === 'case-mismatch' || rule.reason === 'word-boundary-mismatch') {
+      status = 'pattern-mismatch'
+      recommendation = 'Review matchCase and wholeWord settings against the supplied source sample.'
+    } else {
+      status = 'unused-in-sample'
+      recommendation = 'The source term was not observed in this sample; check a representative corpus before removing it.'
+    }
+    return {
+      entryNumber: rule.index + 1,
+      source: rule.source,
+      target: rule.target,
+      sourceLanguage: rule.sourceLanguage,
+      targetLanguage: rule.targetLanguage,
+      matchCase: rule.matchCase,
+      wholeWord: rule.wholeWord,
+      enabled: rule.enabled,
+      priority: rule.priority,
+      occurrences: rule.matches.length,
+      appliedOccurrences: applied.length,
+      shadowedOccurrences: shadowed.length,
+      status,
+      reason: rule.reason,
+      recommendation,
+    }
+  })
+  const appliedOccurrences = rules.flatMap((rule) =>
+    rule.matches.filter((match) => match.decision === 'applied'),
+  )
+  const shadowedOccurrences = rules.flatMap((rule) =>
+    rule.matches.filter((match) => match.decision === 'shadowed'),
+  )
+  const sourceCodeUnits = sourceText.length
+  const matchedSourceCodeUnits = appliedOccurrences.reduce(
+    (total, match) => total + match.text.length,
+    0,
+  )
+  const summary = {
+    totalRules: ruleReports.length,
+    activeRules: ruleReports.filter((rule) => rule.status === 'active' || rule.status === 'partially-active').length,
+    fullyShadowedRules: ruleReports.filter((rule) => rule.status === 'fully-shadowed').length,
+    unusedRules: ruleReports.filter((rule) => rule.status === 'unused-in-sample').length,
+    disabledRules: ruleReports.filter((rule) => rule.status === 'disabled').length,
+    outOfScopeRules: ruleReports.filter((rule) => rule.status === 'out-of-scope').length,
+    patternMismatchRules: ruleReports.filter((rule) => rule.status === 'pattern-mismatch').length,
+    candidateOccurrences: appliedOccurrences.length + shadowedOccurrences.length,
+    appliedOccurrences: appliedOccurrences.length,
+    shadowedOccurrences: shadowedOccurrences.length,
+    sourceCodeUnits,
+    matchedSourceCodeUnits,
+    coveragePercent: sourceCodeUnits === 0
+      ? 0
+      : Math.round((matchedSourceCodeUnits / sourceCodeUnits) * 10000) / 100,
+  }
+  const report = {
+    command: 'audit',
+    valid: true,
+    sourceLanguage,
+    targetLanguage,
+    providerCalls: 0,
+    summary,
+    rules: ruleReports,
+    warnings: validation.warnings,
+    note: 'Audit metrics describe only the supplied sample. Coverage is the percentage of UTF-16 source code units replaced by winning local glossary matches; shadowed occurrences are excluded. No machine translation or provider request is performed.',
+  }
+
+  if (format === 'json') {
+    writeJson(report)
+  } else {
+    process.stdout.write('Glossary coverage audit (no provider calls)\\n')
+    process.stdout.write('Language pair: ' + sourceLanguage + ' -> ' + targetLanguage + '\\n')
+    process.stdout.write(
+      'Coverage: ' + summary.coveragePercent + '% (' + matchedSourceCodeUnits +
+      '/' + sourceCodeUnits + ' source code units)\\n',
+    )
+    process.stdout.write(
+      'Rules: ' + summary.totalRules +
+      '; active: ' + summary.activeRules +
+      '; fully shadowed: ' + summary.fullyShadowedRules +
+      '; unused: ' + summary.unusedRules +
+      '; out of scope: ' + summary.outOfScopeRules +
+      '; disabled: ' + summary.disabledRules +
+      '; pattern mismatch: ' + summary.patternMismatchRules + '\\n',
+    )
+    for (const rule of ruleReports) {
+      process.stdout.write(
+        '[' + rule.entryNumber + '] ' + rule.source + ' -> ' + rule.target +
+        ': ' + rule.status + ' (' + rule.appliedOccurrences + '/' + rule.occurrences +
+        ' applied)' + (rule.reason ? ' [' + rule.reason + ']' : '') + '\\n',
+      )
+    }
+    diagnosticLines(validation.warnings, 'WARN')
+  }
+  return 0
+}
+
 function main(argv) {
   if (argv.length === 0 || (argv.length === 1 && argv[0] === '--help')) {
     process.stdout.write(USAGE + '\n')
@@ -581,6 +745,7 @@ function main(argv) {
     if (command === 'preview') return preview(args)
     if (command === 'diff') return diff(args)
     if (command === 'explain') return explain(args)
+    if (command === 'audit') return audit(args)
     throw new CliError('Unknown command: ' + command)
   } catch (error) {
     process.stderr.write('Error: ' + (error instanceof Error ? error.message : String(error)) + '\n')

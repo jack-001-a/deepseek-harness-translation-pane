@@ -21,6 +21,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Add the `dsh-translation-glossary` CLI for CI validation, structured diagnostics and local replacement previews; previews make no provider requests.
 - Add glossary revision diffing to report added, removed, changed and reordered rules with machine-readable output.
 - Add a glossary match explanation command with occurrence offsets, overlap blockers, language-scope and boundary diagnostics, and a local preview.
+- Add glossary coverage auditing for sample corpora, including active, unused, shadowed and out-of-scope rule counts with JSON output.
 - Clarify overlap precedence: earliest source position wins, then per-position priority, match length and original entry order.
 
 

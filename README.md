@@ -349,6 +349,11 @@ npm run glossary -- explain path/to/glossary.json \
   --source-language en --target-language zh-Hans \
   --text "DeepSeek API" --format json
 
+# Audit term coverage against a representative source corpus.
+npm run glossary -- audit path/to/glossary.json \
+  --source-language en --target-language zh-Hans \
+  --text-file ./samples/source.txt --format json
+
 # Read the glossary from stdin.
 cat path/to/glossary.json | npm run glossary -- validate -
 ```
@@ -366,8 +371,12 @@ input may come from stdin. `explain` shows each rule's decision and matching
 occurrences, including overlap blockers and reasons for skipped rules such as
 disabled state, language-scope mismatch, case mismatch, word-boundary mismatch
 or no source occurrence. Match offsets are zero-based UTF-16 code units. The
-final preview is glossary-only; this command makes no provider requests. The
-installed package also exposes the `dsh-translation-glossary` executable.
+final preview is glossary-only; this command makes no provider requests. `audit`
+aggregates the same decisions over a supplied sample, reporting active, unused,
+fully shadowed, disabled, out-of-scope and pattern-mismatch rules plus the
+percentage of source code units replaced by winning local matches. Audit
+coverage describes only the supplied sample; it is not a corpus-wide guarantee.
+The installed package also exposes the `dsh-translation-glossary` executable.
 
 
 ## Install
