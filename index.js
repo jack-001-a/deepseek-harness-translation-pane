@@ -67,6 +67,8 @@ const CACHE_ENTRY_OVERHEAD_BYTES = 256
 const DEFAULT_RATE_LIMIT_PER_MINUTE = 60
 /** Fragments dispatched at the same time. */
 const DEFAULT_MAX_CONCURRENCY = 3
+/** Waiting provider attempts retained before new demands are rejected as busy. */
+const DEFAULT_MAX_QUEUED_REQUESTS = 24
 /** Node clamps timer delays above this value to 1 ms; cap configured deadlines. */
 const MAX_TIMER_DELAY_MS = 2_147_483_647
 
@@ -86,6 +88,7 @@ const CODE = Object.freeze({
   providerUnreachable: 'translation-pane/provider-unreachable',
   timeout: 'translation-pane/timeout',
   rateLimited: 'translation-pane/rate-limited',
+  busy: 'translation-pane/busy',
   providerError: 'translation-pane/provider-error',
   invalidResponse: 'translation-pane/invalid-response',
   // Kept for the shared vocabulary: the browser half raises it against the
@@ -708,6 +711,100 @@ class TokenBucket {
   }
 }
 
+class FairSemaphore {
+  /**
+   * @param limit - maximum provider attempts active at once.
+   * @param maxQueued - maximum pending attempts retained.
+   */
+  constructor(limit, maxQueued) {
+    this.limit = limit
+    this.maxQueued = maxQueued
+    this.active = 0
+    this.queue = []
+  }
+
+  /**
+   * Acquire one slot in arrival order.
+   * @param signal - optional deadline/cancellation signal.
+   * @returns an idempotent release callback.
+   */
+  acquire(signal) {
+    if (signal?.aborted) return Promise.reject(this.abortReason(signal))
+    if (this.active < this.limit && this.queue.length === 0) {
+      this.active += 1
+      return Promise.resolve(this.releaseHandle())
+    }
+    if (this.queue.length >= this.maxQueued) {
+      return Promise.reject(
+        new TranslationPaneError(
+          CODE.busy,
+          'translationPane: the local request queue is full',
+          { limit: this.maxQueued },
+        ),
+      )
+    }
+    return new Promise((resolve, reject) => {
+      const waiter = { signal, resolve, reject, onAbort: undefined }
+      if (signal !== undefined && signal !== null) {
+        waiter.onAbort = () => {
+          const index = this.queue.indexOf(waiter)
+          if (index >= 0) this.queue.splice(index, 1)
+          signal.removeEventListener('abort', waiter.onAbort)
+          reject(this.abortReason(signal))
+          this.drain()
+        }
+        signal.addEventListener('abort', waiter.onAbort, { once: true })
+      }
+      this.queue.push(waiter)
+      // Close the small race between the initial check and listener install.
+      if (signal?.aborted) waiter.onAbort()
+      else this.drain()
+    })
+  }
+
+  /** @returns an idempotent callback that releases one active slot. */
+  releaseHandle() {
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      this.active -= 1
+      this.drain()
+    }
+  }
+
+  /** Grant free slots to the oldest live waiters. */
+  drain() {
+    while (this.active < this.limit && this.queue.length > 0) {
+      const waiter = this.queue.shift()
+      waiter.signal?.removeEventListener('abort', waiter.onAbort)
+      if (waiter.signal?.aborted) {
+        waiter.reject(this.abortReason(waiter.signal))
+        continue
+      }
+      this.active += 1
+      waiter.resolve(this.releaseHandle())
+    }
+  }
+
+  /** @param signal - the aborted signal. */
+  abortReason(signal) {
+    const reason = signal?.reason
+    return reason instanceof Error ? reason : new Error('translationPane: the request was cancelled')
+  }
+
+  /** Number of provider attempts currently holding a slot. */
+  get activeCount() {
+    return this.active
+  }
+
+  /** Number of live provider attempts waiting for a slot. */
+  get queuedCount() {
+    return this.queue.length
+  }
+}
+
+
 /**
  * Read a positive number from the config.
  * @param value - the raw config value.
@@ -793,6 +890,7 @@ export function resolveConfig(config) {
     cacheMaxBytes: nonNegative(raw.cacheMaxBytes, DEFAULT_CACHE_MAX_BYTES),
     rateLimitPerMinute: positive(raw.rateLimitPerMinute, DEFAULT_RATE_LIMIT_PER_MINUTE),
     maxConcurrency: positive(raw.maxConcurrency, DEFAULT_MAX_CONCURRENCY),
+    maxQueuedRequests: nonNegative(raw.maxQueuedRequests, DEFAULT_MAX_QUEUED_REQUESTS),
     // The jitter source is injectable so the back-off is exactly testable.
     jitter: typeof raw.jitter === 'function' ? raw.jitter : Math.random,
   })
@@ -816,6 +914,8 @@ export class TranslationPaneService {
     this.inflight = new Map()
     /** Meter of anonymous provider requests. */
     this.bucket = new TokenBucket(config.rateLimitPerMinute)
+    /** FIFO service-wide cap shared by direct and shipped-translator routes. */
+    this.requestSlots = new FairSemaphore(config.maxConcurrency, config.maxQueuedRequests)
     /** Observed direct-provider availability, in-memory only. */
     this.health = new ProviderHealth(config.providerCooldownMs)
     this.cacheHits = 0
@@ -847,6 +947,10 @@ export class TranslationPaneService {
       fragmentChars: this.config.fragmentChars,
       maxRetries: this.config.maxRetries,
       rateLimitPerMinute: this.config.rateLimitPerMinute,
+      maxConcurrency: this.config.maxConcurrency,
+      maxQueuedRequests: this.config.maxQueuedRequests,
+      activeRequests: this.requestSlots.activeCount,
+      queuedRequests: this.requestSlots.queuedCount,
       cacheEntries: this.cache.size,
       cacheHits: this.cacheHits,
       cacheMisses: this.cacheMisses,
@@ -1445,24 +1549,33 @@ export class TranslationPaneService {
       typeof retries === 'number' ? Math.min(retries, this.config.maxRetries) : this.config.maxRetries
     let attempt = 0
     for (;;) {
-      if (!this.bucket.take()) {
-        // The local bucket is shared by every provider, so another provider
-        // would be refused too; this failure must never cause a failover.
-        throw new TranslationPaneError(
-          CODE.rateLimited,
-          `translationPane: the ${this.config.rateLimitPerMinute}-request-per-minute limit is exhausted`,
-          { limit: this.config.rateLimitPerMinute },
-        )
-      }
+      // Acquire before spending a provider token. A queued or cancelled
+      // demand must not reserve rate-limit capacity before it can run.
+      const release = await this.requestSlots.acquire(signal)
+      let failure
       try {
+        if (signal?.aborted) throw this.abortReason(signal)
+        if (!this.bucket.take()) {
+          // The local bucket is shared by every provider, so another provider
+          // would be refused too; this failure must never cause a failover.
+          throw new TranslationPaneError(
+            CODE.rateLimited,
+            `translationPane: the ${this.config.rateLimitPerMinute}-request-per-minute limit is exhausted`,
+            { limit: this.config.rateLimitPerMinute },
+          )
+        }
         return await this.attempt(provider, url, init, signal)
       } catch (error) {
         if (error?.retryable !== true || attempt >= budget) throw error
-        const wait = this.backoff(attempt, error)
-        this.log('debug', `retrying the ${provider} request after ${wait}ms`)
-        await this.sleep(wait, signal)
-        attempt += 1
+        failure = error
+      } finally {
+        // Back-off never holds a scarce provider slot.
+        release()
       }
+      const wait = this.backoff(attempt, failure)
+      this.log('debug', `retrying the ${provider} request after ${wait}ms`)
+      await this.sleep(wait, signal)
+      attempt += 1
     }
   }
 
@@ -1681,6 +1794,24 @@ export class TranslationPaneService {
    * @returns the translated fragment.
    */
   async translateFragment(translator, spec, fragment, signal) {
+    const release = await this.requestSlots.acquire(signal)
+    try {
+      if (signal?.aborted) throw this.abortReason(signal)
+      return await this.translateFragmentWithSlot(translator, spec, fragment, signal)
+    } finally {
+      release()
+    }
+  }
+
+  /**
+   * Translate one fragment while holding a service-wide provider slot.
+   * @param translator - the shipped translator service.
+   * @param spec - the validated request.
+   * @param fragment - the source fragment.
+   * @param signal - the deadline signal.
+   * @returns the translated fragment.
+   */
+  async translateFragmentWithSlot(translator, spec, fragment, signal) {
     let resolved
     try {
       resolved = translator.resolve({
