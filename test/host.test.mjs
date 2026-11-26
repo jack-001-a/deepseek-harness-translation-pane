@@ -341,20 +341,20 @@ test('describe: it reports the routing facts the browser needs', () => {
   const h = harness()
   const described = h.service.describe()
   assert.deepEqual(Object.keys(described).sort(), [
+    'activeRequests',
     'cacheEntries',
     'cacheHits',
     'cacheMisses',
     'failover',
     'fragmentChars',
     'languages',
-    'maxRetries',
     'maxConcurrency',
     'maxQueuedRequests',
-    'activeRequests',
-    'queuedRequests',
+    'maxRetries',
     'maxTextChars',
     'providerHealth',
     'providers',
+    'queuedRequests',
     'rateLimitPerMinute',
     'route',
   ])
