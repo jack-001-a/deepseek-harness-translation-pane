@@ -87,6 +87,19 @@ try {
   )
   assert.equal(providerRequests.length, beforeInvalid, 'invalid JSON must fail before provider I/O')
 
+  const glossaryUpdate = service.setGlossary(JSON.stringify({
+    version: 1,
+    glossary: [{ source: 'DeepSeek', target: '深度求索', sourceLanguage: 'en', targetLanguage: 'zh-Hans' }],
+  }))
+  assert.equal(glossaryUpdate.count, 1)
+  const afterGlossary = await service.translate({
+    text: 'DeepSeek',
+    sourceLanguage: 'en',
+    targetLanguage: 'zh-Hans',
+  })
+  assert.equal(afterGlossary.text, '深度求索')
+  assert.deepEqual(providerRequests, ['hello'], 'glossary replacements must remain local to the Host')
+
   outcome = 'PASS'
 } catch (error) {
   failure = error instanceof Error ? error.stack ?? error.message : String(error)
@@ -106,6 +119,8 @@ try {
       'remote-method-descriptor',
       'json-value-only-translation',
       'invalid-json-rejected-before-provider-io',
+      'runtime-glossary-update-over-real-cordis-service',
+      'glossary-source-kept-out-of-provider-io',
     ],
     providerRequests,
     ...(failure === undefined ? {} : { failure }),
