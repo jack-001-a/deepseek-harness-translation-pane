@@ -757,6 +757,31 @@ test('retry: malformed Retry-After values use bounded exponential back-off', asy
   }
 })
 
+test('retry: overflowing but valid decimal Retry-After hints stay within the configured cap', async (t) => {
+  let attempts = 0
+  mockFetch(async () => {
+    attempts += 1
+    if (attempts === 1) {
+      // This parses as a finite Number, but multiplying by 1000 would overflow.
+      return jsonResponse({}, { status: 429, headers: { 'retry-after': '9'.repeat(308) } })
+    }
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness({
+    config: { failover: false, maxRetries: 1, retryBaseMs: 100, retryMaxMs: 1000, jitter: () => 1 },
+  })
+  const delays = []
+  h.service.sleep = async (ms) => {
+    delays.push(ms)
+  }
+
+  const result = await h.service.translate({ text: 'large delay-seconds', targetLanguage: 'en' })
+  assert.equal(result.text, 'ok')
+  assert.equal(attempts, 2)
+  assert.deepEqual(delays, [1000])
+})
+
 test('retry: valid HTTP-date forms are honoured as Retry-After values', async (t) => {
   let retryAfter = 'Wed, 21 Oct 2099 07:28:00 GMT'
   let attempts = 0
