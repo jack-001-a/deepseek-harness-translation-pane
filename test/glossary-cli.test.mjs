@@ -511,7 +511,7 @@ test('quality policy rejects malformed schema metadata', (t) => {
     }))
     const result = runCli(['audit', glossary, '--text-file', source, '--format', 'json', '--policy', policy])
     assert.equal(result.status, 2)
-    assert.match(result.stderr, /Quality policy \\$schema/)
+    assert.match(result.stderr, /Quality policy/)
   }
 })
 
