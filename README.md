@@ -300,7 +300,7 @@ Glossary entry fields:
 | `sourceLanguage`, `targetLanguage` | `*` | `*` matches every language; a BCP-47 tag also matches regional subtags |
 | `matchCase` | `false` | Match exact letter case when `true` |
 | `wholeWord` | inferred | Omit to infer ASCII boundaries; `true` requires whole-word boundaries, `false` allows substring matches |
-| `priority` | `0` | Integer from `-1000` to `1000`; higher values win before longest-match ordering |
+| `priority` | `0` | Integer from `-1000` to `1000`; earlier source positions take precedence; at the same position, higher priority wins, then longer terms and original order |
 | `enabled` | `true` | Set to `false` to retain an entry without applying it |
 
 The portable JSON format is:
@@ -322,6 +322,37 @@ The portable JSON format is:
 ```
 
 The editor's **Import JSON file** reads this format (and the legacy array); **Apply glossary** validates and activates it for the current Host session; **Copy / export JSON** copies the active terms in the portable format. Overlap warnings are non-fatal and deterministic. Conflicting duplicate source terms in the same language scope block import until resolved.
+
+## Glossary CLI
+
+The package includes a dependency-free Node.js CLI for local validation and
+review. It uses the same glossary parser and matcher as the Host; it never
+contacts a translation provider.
+
+```bash
+# Validate a versioned glossary or legacy JSON array.
+npm run glossary -- validate path/to/glossary.json
+
+# Emit a machine-readable report suitable for CI.
+npm run glossary -- validate path/to/glossary.json --format json
+
+# Preview local term substitutions for a language pair.
+npm run glossary -- preview path/to/glossary.json \
+  --source-language en --target-language zh-Hans \
+  --text "DeepSeek API is available." --format json
+
+# Read the glossary from stdin.
+cat path/to/glossary.json | npm run glossary -- validate -
+```
+
+`validate` exits with `0` when there are no errors (warnings remain
+non-fatal), `1` when the glossary is invalid, and `2` for command, option or
+file errors. JSON mode includes accepted-entry counts plus structured errors
+and warnings. `preview` reports only local glossary substitutions: unmatched
+source text remains unchanged and is not machine-translated. It makes zero
+provider requests. The installed package also exposes the
+`dsh-translation-glossary` executable.
+
 
 ## Install
 

@@ -18,6 +18,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   locally and are not sent to translation providers.
 - Add versioned JSON glossary import/export and live Host-session activation;
   glossary changes invalidate cached translations and cancel in-flight work.
+- Add the `dsh-translation-glossary` CLI for CI validation, structured diagnostics and local replacement previews; previews make no provider requests.
+- Clarify overlap precedence: earliest source position wins, then per-position priority, match length and original entry order.
 
 
 ### Fixed
