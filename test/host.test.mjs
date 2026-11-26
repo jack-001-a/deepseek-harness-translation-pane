@@ -314,6 +314,19 @@ test('config: sensible overrides are accepted and unusable values fall back', ()
   assert.equal(resolveConfig({ providerCooldownMs: 0 }).providerCooldownMs, 0)
 })
 
+test('config: timer delays stay within Node\'s supported timeout range', () => {
+  const config = resolveConfig({
+    timeoutMs: 3_000_000_000,
+    attemptTimeoutMs: 3_000_000_000,
+    retryBaseMs: 3_000_000_000,
+    retryMaxMs: 4_000_000_000,
+  })
+  assert.equal(config.timeoutMs, 2_147_483_647)
+  assert.equal(config.attemptTimeoutMs, 2_147_483_647)
+  assert.equal(config.retryBaseMs, 2_147_483_647)
+  assert.equal(config.retryMaxMs, 2_147_483_647)
+})
+
 test('config: provider endpoints reject credentials and URL fragments', () => {
   const config = resolveConfig({
     bingEndpoint: 'https://user:password@example.test/translate',
@@ -737,6 +750,134 @@ test('retry: a 429 is retried and the Retry-After header is honoured', async (t)
     'the Retry-After hint takes precedence even when it exceeds retryMaxMs',
   )
 })
+
+test('retry: malformed Retry-After values use bounded exponential back-off', async (t) => {
+  let retryAfter = '-1'
+  let attempts = 0
+  mockFetch(async () => {
+    attempts += 1
+    if (attempts === 1) {
+      return jsonResponse({}, { status: 429, headers: { 'retry-after': retryAfter } })
+    }
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness({
+    config: { failover: false, maxRetries: 1, retryBaseMs: 100, retryMaxMs: 1000, jitter: () => 1 },
+  })
+  const delays = []
+  h.service.sleep = async (ms) => {
+    delays.push(ms)
+  }
+
+  for (const malformed of [
+    '-1',
+    '1.5',
+    '+2',
+    '1e3',
+    '0x10',
+    'Thursday, 21-Oct-50 07:28:00 GMT',
+    'Fri, 31 Feb 2099 07:28:00 GMT',
+  ]) {
+    retryAfter = malformed
+    attempts = 0
+    delays.length = 0
+    const result = await h.service.translate({ text: 'malformed ' + malformed, targetLanguage: 'en' })
+    assert.equal(result.text, 'ok')
+    assert.equal(attempts, 2, 'one retry should be made for ' + malformed)
+    assert.deepEqual(delays, [100], malformed + ' must not be interpreted as a delay or date')
+  }
+})
+
+test('retry: overflowing but valid decimal Retry-After hints stay within the configured cap', async (t) => {
+  let attempts = 0
+  mockFetch(async () => {
+    attempts += 1
+    if (attempts === 1) {
+      // This parses as a finite Number, but multiplying by 1000 would overflow.
+      return jsonResponse({}, { status: 429, headers: { 'retry-after': '9'.repeat(308) } })
+    }
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness({
+    config: { failover: false, maxRetries: 1, retryBaseMs: 100, retryMaxMs: 1000, jitter: () => 1 },
+  })
+  const delays = []
+  h.service.sleep = async (ms) => {
+    delays.push(ms)
+  }
+
+  const result = await h.service.translate({ text: 'large delay-seconds', targetLanguage: 'en' })
+  assert.equal(result.text, 'ok')
+  assert.equal(attempts, 2)
+  assert.deepEqual(delays, [1000])
+})
+
+test('retry: RFC 850 dates more than 50 years ahead map to the most recent past year', async (t) => {
+  let attempts = 0
+  mockFetch(async () => {
+    attempts += 1
+    if (attempts === 1) {
+      return jsonResponse({}, { status: 429, headers: { 'retry-after': 'Friday, 21-Oct-77 07:28:00 GMT' } })
+    }
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness({
+    config: { failover: false, maxRetries: 1, retryBaseMs: 100, retryMaxMs: 5000, jitter: () => 1 },
+  })
+  const delays = []
+  h.service.sleep = async (ms) => {
+    delays.push(ms)
+  }
+
+  const result = await h.service.translate({ text: 'RFC 850 past-century date', targetLanguage: 'en' })
+  assert.equal(result.text, 'ok')
+  assert.equal(attempts, 2)
+  assert.deepEqual(
+    delays,
+    [0],
+    '2077 is more than 50 years ahead in 2026, so the RFC 850 year must be interpreted as 1977',
+  )
+})
+
+test('retry: valid HTTP-date forms are honoured as Retry-After values', async (t) => {
+  let retryAfter = 'Wed, 21 Oct 2099 07:28:00 GMT'
+  let attempts = 0
+  mockFetch(async () => {
+    attempts += 1
+    if (attempts === 1) {
+      return jsonResponse({}, { status: 429, headers: { 'retry-after': retryAfter } })
+    }
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness({
+    config: { failover: false, maxRetries: 1, retryBaseMs: 100, retryMaxMs: 5000, jitter: () => 1 },
+  })
+  const delays = []
+  h.service.sleep = async (ms) => {
+    delays.push(ms)
+  }
+
+  for (const [index, date] of [
+    [0, 'Wed, 21 Oct 2099 07:28:00 GMT'],
+    [1, 'Thursday, 21-Oct-49 07:28:00 GMT'],
+    // A two-digit year still in the 50-year window maps to this century.
+    [2, 'Friday, 21-Oct-50 07:28:00 GMT'],
+    [3, 'Wed Oct 21 07:28:00 2099'],
+  ]) {
+    retryAfter = date
+    attempts = 0
+    delays.length = 0
+    const result = await h.service.translate({ text: 'valid date ' + index, targetLanguage: 'en' })
+    assert.equal(result.text, 'ok')
+    assert.equal(attempts, 2)
+    assert.deepEqual(delays, [5000], date + ' should be capped by retryMaxMs')
+  }
+})
+
 
 test('retry: the budget is bounded', async (t) => {
   let attempts = 0
