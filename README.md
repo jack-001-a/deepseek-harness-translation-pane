@@ -21,6 +21,8 @@ Choose **JSON values only** in the Format selector to translate JSON safely. The
 
 Choose **Markdown (preserve structure)** to translate prose while keeping fenced and inline code, Markdown link destinations and syntax, bare URLs, template placeholders, HTML tags, entities and common block prefixes out of provider requests. Link labels and ordinary prose are translated; protected source spans are reassembled unchanged and in their original order. This is a conservative Markdown lexer, not a full CommonMark parser, so project-specific extensions or unusual nested link syntax may need additional coverage. The agent tool accepts the same opt-in `format: "markdown"` argument. The default remains plain text.
 
+Configure a **Glossary** in the profile patch to keep product names, technical vocabulary and preferred wording consistent. Each `{ source, target }` pair is matched case-insensitively; longer terms take priority, and ASCII word boundaries prevent accidental partial matches. Matching source terms are replaced locally and are not sent to the translation provider. This applies to plain text, JSON string values and Markdown prose, but never to Markdown code or other protected spans.
+
 ## How translation runs
 
 The Host half prefers the shipped `ctx.translator` service when the
@@ -118,11 +120,13 @@ the requested provider when failover is enabled. A long document can be sent
 as several fragment requests, and a single document can be served by both
 providers.
 
-- **What leaves the Host.** In plain-text mode, the submitted source text,
-  source-language hint (when supplied), target language and protocol metadata
-  required by the selected endpoint. In JSON mode, only decoded JSON string
-  values are sent for translation; object keys, structural punctuation,
-  whitespace, numbers, booleans and null remain local. Do not submit secrets,
+- **What leaves the Host.** In plain-text mode, only unmatched text segments
+  are sent; configured glossary source terms are replaced locally with their
+  preferred target wording. In JSON mode, only decoded string-value segments
+  that are not matched by the glossary are sent; object keys, structural
+  punctuation, whitespace, numbers, booleans and null remain local. In
+  Markdown mode, only prose segments are sent; code, URLs, link destinations,
+  placeholders, HTML tags and Markdown syntax stay local. Do not submit secrets,
   credentials, personal data or confidential source code unless the user is
   authorized to disclose them to that provider.
 - **Who receives it.** Microsoft receives requests routed to the Edge/Bing
@@ -149,8 +153,9 @@ providers.
   translator route follows its own provider configuration and policy.
 
 The `translate_text` agent tool's description also states that it sends the
-submitted text to an external machine-translation provider. Applications
-should make this data flow clear before users submit sensitive material.
+unmatched text segments to an external machine-translation provider; configured
+glossary matches are substituted locally. Applications should make this data
+flow clear before users submit sensitive material.
 
 ## The panel and the tool share one code path
 
@@ -248,6 +253,11 @@ or invalid.
     cacheSize: 64
     rateLimitPerMinute: 60
     maxConcurrency: 3
+    glossary:
+      - source: DeepSeek API
+        target: 深度求索接口
+      - source: API
+        target: 接口
 ```
 
 | Key | Default | Meaning |
@@ -267,6 +277,7 @@ or invalid.
 | `cacheSize` | `64` | Bounded LRU of finished translations; `0` disables it |
 | `rateLimitPerMinute` | `60` | Token bucket across all callers |
 | `maxConcurrency` | `3` | Fragments of one long request in flight at once |
+| `glossary` | `[]` | Up to 128 `{ source, target }` terms (each at most 128 characters); matched source terms are locally replaced and never sent to a provider |
 
 ## Install
 
