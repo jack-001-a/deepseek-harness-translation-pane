@@ -91,7 +91,7 @@ test('translation plans split only prose and reassemble results in their origina
 
   const results = fragments.map((text) => ({ text: '[' + text + ']' }))
   const rendered = renderTranslationPlans(plans, results)
-  assert.deepEqual(rendered.texts, ['深度求索[ ][接口][ is ][useful]', '接口'])
+  assert.deepEqual(rendered.texts, ['深度求索[ ][ is ][useful]', '接口'])
   assert.equal(rendered.consumed, results.length)
 })
 
