@@ -1146,6 +1146,12 @@ export class TranslationPaneService {
    */
   async dispatch(fragments, spec, route, translator, signal) {
     const results = new Array(fragments.length)
+    // A failed fragment must cancel other already-running requests immediately.
+    // Waiting for Promise.all before aborting can otherwise hold the request
+    // open until the global deadline and waste provider capacity.
+    const cancellation = new AbortController()
+    const workerSignal =
+      signal === undefined ? cancellation.signal : AbortSignal.any([signal, cancellation.signal])
     let next = 0
     let failed = false
     let failure
@@ -1160,11 +1166,14 @@ export class TranslationPaneService {
         try {
           results[index] =
             route === 'translator'
-              ? await this.translateFragment(translator, spec, fragments[index], signal)
-              : await this.translateDirect(spec, fragments[index], signal)
+              ? await this.translateFragment(translator, spec, fragments[index], workerSignal)
+              : await this.translateDirect(spec, fragments[index], workerSignal)
         } catch (error) {
-          if (!failed) failure = error
-          failed = true
+          if (!failed) {
+            failure = error
+            failed = true
+            cancellation.abort(error)
+          }
           return
         }
       }
