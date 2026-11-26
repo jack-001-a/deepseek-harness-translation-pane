@@ -287,6 +287,42 @@ test('config: sensible overrides are accepted and unusable values fall back', ()
   assert.equal(resolveConfig({ providerCooldownMs: 0 }).providerCooldownMs, 0)
 })
 
+test('config: positive fractions never collapse into zero', () => {
+  const config = resolveConfig({
+    timeoutMs: 0.5,
+    attemptTimeoutMs: 0.5,
+    maxTextChars: 0.5,
+    fragmentChars: 0.5,
+    retryBaseMs: 0.5,
+    retryMaxMs: 0.5,
+    maxResponseBytes: 0.5,
+    rateLimitPerMinute: 0.5,
+    maxConcurrency: 0.5,
+  })
+  assert.equal(config.timeoutMs, 1)
+  assert.equal(config.attemptTimeoutMs, 1)
+  assert.equal(config.maxTextChars, 1)
+  assert.equal(config.fragmentChars, 1)
+  assert.equal(config.retryBaseMs, 1)
+  assert.equal(config.retryMaxMs, 1)
+  assert.equal(config.maxResponseBytes, 1)
+  assert.equal(config.rateLimitPerMinute, 1)
+  assert.equal(config.maxConcurrency, 1)
+})
+
+test('config: timer delays stay within Node\'s supported timeout range', () => {
+  const config = resolveConfig({
+    timeoutMs: 3_000_000_000,
+    attemptTimeoutMs: 3_000_000_000,
+    retryBaseMs: 3_000_000_000,
+    retryMaxMs: 4_000_000_000,
+  })
+  assert.equal(config.timeoutMs, 2_147_483_647)
+  assert.equal(config.attemptTimeoutMs, 2_147_483_647)
+  assert.equal(config.retryBaseMs, 2_147_483_647)
+  assert.equal(config.retryMaxMs, 2_147_483_647)
+})
+
 test('describe: it reports the routing facts the browser needs', () => {
   const h = harness()
   const described = h.service.describe()
