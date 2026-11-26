@@ -398,7 +398,7 @@ export function splitText(text, maxChars) {
  * @returns the delay in milliseconds, or `undefined` when absent or unusable.
  */
 const HTTP_DATE_PATTERN =
-  /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \\d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{4} \\d{2}:\\d{2}:\\d{2} GMT|(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), \\d{2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\\d{2} \\d{2}:\\d{2}:\\d{2} GMT|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (?: [1-9]|[12]\\d|3[01]) \\d{2}:\\d{2}:\\d{2} \\d{4})$/
+  /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT|(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), \d{2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2} \d{2}:\d{2}:\d{2} GMT|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (?: [1-9]|[12]\d|3[01]) \d{2}:\d{2}:\d{2} \d{4})$/
 
 function parseRetryAfter(value) {
   if (typeof value !== 'string') return undefined
@@ -408,7 +408,7 @@ function parseRetryAfter(value) {
   // RFC delay-seconds is one or more decimal digits, not JavaScript's wider
   // Number() grammar (which also accepts signs, fractions and exponent/hex
   // notation). Keep large valid values finite; backoff() applies our cap.
-  if (/^\\d+$/.test(trimmed)) {
+  if (/^\d+$/.test(trimmed)) {
     const seconds = Number(trimmed)
     return Number.isFinite(seconds) ? seconds * 1000 : Number.MAX_VALUE
   }
