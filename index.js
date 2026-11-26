@@ -27,6 +27,7 @@
  * be a Node built-in. Only `node:buffer` is needed.
  */
 import { Buffer } from 'node:buffer'
+import { ProviderHealth, TokenBucket, TranslationCache } from './src/host/runtime-state.js'
 
 /** Cordis service key and API Gateway wire namespace. */
 const SERVICE_KEY = 'translationPane'
@@ -407,173 +408,6 @@ function parseRetryAfter(value) {
 }
 
 /**
- * A bounded least-recently-used map of translated documents.
- *
- * The panel re-translates the same paragraph often and the anonymous
- * endpoints rate-limit, so a small cache removes most of the traffic.
- */
-class TranslationCache {
-  /**
-   * @param limit - how many entries are retained.
-   */
-  constructor(limit) {
-    this.limit = limit
-    this.entries = new Map()
-  }
-
-  /**
-   * Read one entry and mark it as recently used.
-   * @param key - cache key.
-   * @returns the cached value, or `undefined` on a miss.
-   */
-  get(key) {
-    if (!this.entries.has(key)) return undefined
-    const value = this.entries.get(key)
-    this.entries.delete(key)
-    this.entries.set(key, value)
-    return value
-  }
-
-  /**
-   * Store one entry, evicting the least recently used one when full.
-   * @param key - cache key.
-   * @param value - cached value.
-   */
-  set(key, value) {
-    if (this.limit <= 0) return
-    if (this.entries.has(key)) this.entries.delete(key)
-    this.entries.set(key, value)
-    while (this.entries.size > this.limit) {
-      const oldest = this.entries.keys().next()
-      if (oldest.done) break
-      this.entries.delete(oldest.value)
-    }
-  }
-
-  /** How many entries are retained. */
-  get size() {
-    return this.entries.size
-  }
-}
-
-/**
- * The observed availability of the direct providers.
- *
- * A provider that failed a transport-level fault is not asked again for a
- * while: the panel reports it, and the next demand goes straight to the other
- * provider instead of paying the same failure first. The state is plain data
- * and in-memory per service instance; `snapshot()` never touches the network.
- */
-class ProviderHealth {
-  /**
-   * @param cooldownMs - how long one failure is remembered; `0` disables it.
-   */
-  constructor(cooldownMs) {
-    this.cooldownMs = cooldownMs
-    this.failures = new Map()
-  }
-
-  /**
-   * Remember one provider failure.
-   * @param provider - provider id.
-   * @param reason - the stable failure code, kept per provider.
-   * @param now - the current time, injectable for diagnostics.
-   */
-  recordFailure(provider, reason, now = Date.now()) {
-    if (this.cooldownMs <= 0) return
-    this.failures.set(provider, {
-      reason: typeof reason === 'string' ? reason : '',
-      until: now + this.cooldownMs,
-    })
-  }
-
-  /**
-   * Forget a provider failure, because the provider just answered.
-   * @param provider - provider id.
-   */
-  recordSuccess(provider) {
-    this.failures.delete(provider)
-  }
-
-  /**
-   * Whether a provider may be tried now.
-   * @param provider - provider id.
-   * @param now - the current time, injectable for diagnostics.
-   * @returns whether the provider is not inside its cooldown.
-   */
-  isAvailable(provider, now = Date.now()) {
-    const failure = this.failures.get(provider)
-    if (failure === undefined) return true
-    if (now >= failure.until) {
-      this.failures.delete(provider)
-      return true
-    }
-    return false
-  }
-
-  /**
-   * The serializable health facts the panel reports.
-   * @param now - the current time, injectable for diagnostics.
-   * @returns plain data keyed by provider id.
-   */
-  snapshot(now = Date.now()) {
-    const health = {}
-    for (const provider of DIRECT_PROVIDERS) {
-      const failure = this.failures.get(provider)
-      if (failure === undefined || now >= failure.until) {
-        health[provider] = { unreachable: false }
-        continue
-      }
-      health[provider] = {
-        unreachable: true,
-        until: new Date(failure.until).toISOString(),
-        reason: failure.reason,
-      }
-    }
-    return health
-  }
-
-  /** Drop every observation, so an unloaded service leaves nothing behind. */
-  reset() {
-    this.failures.clear()
-  }
-}
-
-/**
- * A token bucket that meters anonymous provider requests.
- *
- * The endpoints rate-limit aggressively, so an exhausted bucket refuses the
- * request instead of queueing it: an unbounded queue would grow until the
- * panel looks frozen rather than reporting that it is busy.
- */
-class TokenBucket {
-  /**
-   * @param perMinute - how many requests are allowed per minute.
-   */
-  constructor(perMinute) {
-    this.perMinute = perMinute
-    this.capacity = perMinute
-    this.tokens = perMinute
-    this.updatedAt = Date.now()
-  }
-
-  /**
-   * Take one token when the bucket still has one.
-   * @returns whether the request may proceed.
-   */
-  take() {
-    if (this.perMinute <= 0) return false
-    const now = Date.now()
-    const elapsed = Math.max(0, now - this.updatedAt)
-    this.updatedAt = now
-    this.tokens = Math.min(this.capacity, this.tokens + (elapsed * this.perMinute) / 60000)
-    if (this.tokens < 1) return false
-    this.tokens -= 1
-    return true
-  }
-}
-
-/**
  * Read a positive number from the config.
  * @param value - the raw config value.
  * @param fallback - the default used when the value is unusable.
@@ -675,7 +509,7 @@ export class TranslationPaneService {
     /** Meter of anonymous provider requests. */
     this.bucket = new TokenBucket(config.rateLimitPerMinute)
     /** Observed direct-provider availability, in-memory only. */
-    this.health = new ProviderHealth(config.providerCooldownMs)
+    this.health = new ProviderHealth(config.providerCooldownMs, DIRECT_PROVIDERS)
     this.cacheHits = 0
     this.cacheMisses = 0
     this.typertRemote = Object.freeze({
