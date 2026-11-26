@@ -1,0 +1,63 @@
+name: DSH Glossary Audit
+description: Audit glossary use, emit SARIF 2.1.0, and optionally fail the workflow.
+inputs:
+  glossary-file:
+    description: Path to a versioned glossary JSON file or legacy JSON array.
+    required: true
+  source-file:
+    description: Path to the source text sample.
+    required: true
+  source-language:
+    description: Source language tag or auto.
+    required: false
+    default: auto
+  target-language:
+    description: Target language tag.
+    required: false
+    default: zh-Hans
+  fail-on:
+    description: CI policy: none, unused, shadowed, pattern-mismatch, out-of-scope, or any.
+    required: false
+    default: none
+  sarif-file:
+    description: SARIF output path relative to the workflow workspace.
+    required: false
+    default: glossary-audit.sarif
+outputs:
+  sarif-file:
+    description: Generated SARIF file path, if generation succeeded.
+    value: ${{ steps.audit.outputs.sarif-file }}
+  audit-passed:
+    description: Whether the selected audit policy passed.
+    value: ${{ steps.audit.outputs.audit-passed }}
+  exit-code:
+    description: Audit command exit code.
+    value: ${{ steps.audit.outputs.exit-code }}
+  finding-count:
+    description: Number of SARIF results produced.
+    value: ${{ steps.audit.outputs.finding-count }}
+runs:
+  using: composite
+  steps:
+    - id: audit
+      name: Generate glossary SARIF
+      shell: bash
+      env:
+        ACTION_ROOT: ${{ github.action_path }}
+        INPUT_GLOSSARY_FILE: ${{ inputs.glossary-file }}
+        INPUT_SOURCE_FILE: ${{ inputs.source-file }}
+        INPUT_SOURCE_LANGUAGE: ${{ inputs.source-language }}
+        INPUT_TARGET_LANGUAGE: ${{ inputs.target-language }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
+      run: node "$ACTION_ROOT/../../../scripts/run-glossary-action.mjs"
+    - name: Enforce glossary audit policy
+      if: always()
+      shell: bash
+      env:
+        AUDIT_EXIT_CODE: ${{ steps.audit.outputs.exit-code }}
+      run: |
+        code="${AUDIT_EXIT_CODE:-2}"
+        if [ "$code" != "0" ]; then
+          exit "$code"
+        fi
