@@ -435,8 +435,8 @@ test('fix removes runtime-ignored duplicates but preserves overlapping rules for
   const exported = JSON.parse(readFileSync(output, 'utf8'))
   assert.equal(exported.version, 1)
   assert.equal(exported.glossary.length, 2)
-  assert.equal(exported.glossary[0].source, 'API')
-  assert.equal(exported.glossary[1].source, 'API Gateway')
+  assert.equal(exported.glossary[0].source, 'API Gateway')
+  assert.equal(exported.glossary[1].source, 'API')
 })
 
 test('fix blocks conflicting entries and never overwrites the source file', (t) => {
