@@ -67,6 +67,8 @@ const DEFAULT_RATE_LIMIT_PER_MINUTE = 60
 const DEFAULT_MAX_CONCURRENCY = 3
 /** Waiting provider attempts retained before new demands are rejected as busy. */
 const DEFAULT_MAX_QUEUED_REQUESTS = 24
+/** Node clamps timer delays above this value to 1 ms; cap configured deadlines. */
+const MAX_TIMER_DELAY_MS = 2_147_483_647
 
 /**
  * Failure codes the browser localizes.
@@ -686,7 +688,11 @@ class FairSemaphore {
  */
 function positive(value, fallback) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return fallback
-  return Math.floor(value)
+  // A positive fractional number below 1 must not collapse to zero: that
+  // would silently disable semaphores, rate limits, or request deadlines.
+  // Values beyond the safe-integer range are not useful config values.
+  const integer = Math.floor(value)
+  return Number.isSafeInteger(integer) ? Math.max(1, integer) : fallback
 }
 
 /**
@@ -733,12 +739,12 @@ export function resolveConfig(config) {
   return Object.freeze({
     bingEndpoint: endpoint(raw.bingEndpoint, DEFAULT_BING_ENDPOINT),
     googleEndpoint: endpoint(raw.googleEndpoint, DEFAULT_GOOGLE_ENDPOINT),
-    timeoutMs,
+    timeoutMs: Math.min(timeoutMs, MAX_TIMER_DELAY_MS),
     // One attempt must never outlive the whole request, so the header deadline
     // is capped by the request deadline.
     attemptTimeoutMs: Math.min(
       positive(raw.attemptTimeoutMs, DEFAULT_ATTEMPT_TIMEOUT_MS),
-      timeoutMs,
+      Math.min(timeoutMs, MAX_TIMER_DELAY_MS),
     ),
     // The observation window is per service instance, never persisted.
     providerCooldownMs: nonNegative(raw.providerCooldownMs, DEFAULT_PROVIDER_COOLDOWN_MS),
@@ -750,8 +756,8 @@ export function resolveConfig(config) {
     // oversized request, so the fragment size never exceeds the demand.
     fragmentChars: Math.min(positive(raw.fragmentChars, DEFAULT_FRAGMENT_CHARS), maxTextChars),
     maxRetries: nonNegative(raw.maxRetries, DEFAULT_MAX_RETRIES),
-    retryBaseMs: positive(raw.retryBaseMs, DEFAULT_RETRY_BASE_MS),
-    retryMaxMs: positive(raw.retryMaxMs, DEFAULT_RETRY_MAX_MS),
+    retryBaseMs: Math.min(positive(raw.retryBaseMs, DEFAULT_RETRY_BASE_MS), MAX_TIMER_DELAY_MS),
+    retryMaxMs: Math.min(positive(raw.retryMaxMs, DEFAULT_RETRY_MAX_MS), MAX_TIMER_DELAY_MS),
     maxResponseBytes: positive(raw.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES),
     cacheSize: nonNegative(raw.cacheSize, DEFAULT_CACHE_SIZE),
     rateLimitPerMinute: positive(raw.rateLimitPerMinute, DEFAULT_RATE_LIMIT_PER_MINUTE),
