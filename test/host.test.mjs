@@ -226,6 +226,7 @@ test('config: the defaults are the documented ones', () => {
   assert.equal(config.cacheMaxBytes, 8 * 1024 * 1024)
   assert.equal(config.rateLimitPerMinute, 60)
   assert.equal(config.maxConcurrency, 3)
+  assert.equal(config.maxQueuedRequests, 24)
 })
 
 test('config: sensible overrides are accepted and unusable values fall back', () => {
@@ -347,6 +348,10 @@ test('describe: it reports the routing facts the browser needs', () => {
     'fragmentChars',
     'languages',
     'maxRetries',
+    'maxConcurrency',
+    'maxQueuedRequests',
+    'activeRequests',
+    'queuedRequests',
     'maxTextChars',
     'providerHealth',
     'providers',
@@ -360,6 +365,10 @@ test('describe: it reports the routing facts the browser needs', () => {
   assert.equal(described.fragmentChars, 3000)
   assert.equal(described.maxRetries, 2)
   assert.equal(described.rateLimitPerMinute, 60)
+  assert.equal(described.maxConcurrency, 3)
+  assert.equal(described.maxQueuedRequests, 24)
+  assert.equal(described.activeRequests, 0)
+  assert.equal(described.queuedRequests, 0)
   assert.equal(described.cacheEntries, 0)
   assert.equal(described.cacheHits, 0)
   assert.equal(described.cacheMisses, 0)
@@ -1500,6 +1509,768 @@ test('concurrency: the fragments are dispatched with a bounded concurrency', asy
   const h = harness({ config: { fragmentChars: 50, maxConcurrency: 2 } })
   await h.service.translate({ text: 'a'.repeat(200), targetLanguage: 'en' })
   assert.equal(peak, 2, 'the concurrency must be bounded by the configuration')
+})
+
+test('concurrency: distinct translation demands share one service-wide limit', async (t) => {
+  let running = 0
+  let peak = 0
+  mockFetch(async () => {
+    running += 1
+    peak = Math.max(peak, running)
+    await new Promise((resolve) => setTimeout(resolve, 8))
+    running -= 1
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness({ config: { maxConcurrency: 2 } })
+  await Promise.all(
+    ['first', 'second', 'third', 'fourth'].map((text) =>
+      h.service.translateRequest({ text, targetLanguage: 'en' }),
+    ),
+  )
+  assert.equal(peak, 2, 'unique requests must share the same provider concurrency budget')
+})
+
+test('concurrency: distinct shipped-translator demands share the same service-wide limit', async () => {
+  let running = 0
+  let peak = 0
+  const translator = fakeTranslator({
+    translate: async (spec) => {
+      running += 1
+      peak = Math.max(peak, running)
+      await new Promise((resolve) => setTimeout(resolve, 8))
+      running -= 1
+      return `translated ${spec.text}`
+    },
+  })
+  const h = harness({ translator, config: { maxConcurrency: 1 } })
+
+  await Promise.all(
+    ['one', 'two', 'three'].map((text) =>
+      h.service.translateRequest({ text, targetLanguage: 'en' }),
+    ),
+  )
+  assert.equal(peak, 1, 'the shipped translator route must share the same global slots')
+})
+
+test('scheduler: FIFO waiters are cancellable and do not consume slots after leaving', async (t) => {
+  let releaseFirst
+  let signalFirstStarted
+  const firstStarted = new Promise((resolve) => {
+    signalFirstStarted = resolve
+  })
+  const started = []
+  mockFetch(async (_url, init) => {
+    const source = JSON.parse(init.body)[0]
+    started.push(source)
+    if (source === 'first') {
+      signalFirstStarted()
+      await new Promise((resolve) => {
+        releaseFirst = resolve
+      })
+    }
+    return jsonResponse(bingPayload(source))
+  }, t)
+
+  const h = harness({ config: { maxConcurrency: 1, maxQueuedRequests: 2 } })
+  const first = h.service.translateRequest({ text: 'first', targetLanguage: 'en' })
+  await firstStarted
+
+  const controller = new AbortController()
+  const second = h.service.translateRequest(
+    { text: 'second', targetLanguage: 'en' },
+    controller.signal,
+  )
+  const third = h.service.translateRequest({ text: 'third', targetLanguage: 'en' })
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal(h.service.describe().queuedRequests, 2)
+
+  controller.abort(new Error('the queued caller no longer wants this result'))
+  await assert.rejects(second, /queued caller no longer wants this result/)
+  assert.equal(h.service.describe().queuedRequests, 1, 'cancellation must remove the waiter immediately')
+
+  releaseFirst()
+  await Promise.all([first, third])
+  assert.deepEqual(started, ['first', 'third'], 'the cancelled demand must never reach the provider')
+  assert.equal(h.service.describe().activeRequests, 0)
+  assert.equal(h.service.describe().queuedRequests, 0)
+})
+
+test('scheduler: a full FIFO queue refuses excess work with the busy code', async (t) => {
+  let releaseFirst
+  let signalFirstStarted
+  const firstStarted = new Promise((resolve) => {
+    signalFirstStarted = resolve
+  })
+  mockFetch(async (_url, init) => {
+    const source = JSON.parse(init.body)[0]
+    if (source === 'first') {
+      signalFirstStarted()
+      await new Promise((resolve) => {
+        releaseFirst = resolve
+      })
+    }
+    return jsonResponse(bingPayload(source))
+  }, t)
+
+  const h = harness({ config: { maxConcurrency: 1, maxQueuedRequests: 1 } })
+  const first = h.service.translateRequest({ text: 'first', targetLanguage: 'en' })
+  await firstStarted
+  const second = h.service.translateRequest({ text: 'second', targetLanguage: 'en' })
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  await assert.rejects(
+    h.service.translateRequest({ text: 'third', targetLanguage: 'en' }),
+    (error) => error.code === 'translation-pane/busy',
+  )
+  assert.equal(h.service.describe().queuedRequests, 1)
+  releaseFirst()
+  await Promise.all([first, second])
+})
+
+test('logging: the source text never reaches the log', async (t) => {
+  mockFetch(async () => jsonResponse(bingPayload('ok')), t)
+  const secret = 'a-very-private-sentence'
+  const h = harness()
+  await h.service.translate({ text: secret, targetLanguage: 'en' })
+  const logged = [...h.logs.debug, ...h.logs.warn].join('\n')
+  assert.ok(logged.length > 0, 'the plugin must log something')
+  assert.equal(logged.includes(secret), false)
+})
+
+test('Remote marker: the descriptor names both methods', () => {
+  const h = harness()
+  const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(h.service), REMOTE_METHODS)
+  assert.ok(descriptor, 'the prototype must carry the Remote method descriptor')
+  const marker = descriptor.value
+  assert.equal(marker.version, 1)
+  assert.ok(Object.isFrozen(marker))
+  assert.ok(Object.isFrozen(marker.methods))
+  assert.deepEqual(
+    marker.methods.map((method) => method.method),
+    ['describe', 'translate'],
+  )
+  for (const method of marker.methods) {
+    assert.equal(method.invocation.kind, 'direct')
+    assert.ok(Object.isFrozen(method))
+  }
+})
+
+test('tool: the registration carries the documented schema', () => {
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+  assert.ok(tool, 'the translate_text tool must be registered')
+  assert.equal(tool.parameters.type, 'object')
+  assert.equal(tool.parameters.additionalProperties, false)
+  assert.deepEqual(tool.parameters.required, ['text', 'targetLanguage'])
+  assert.equal(tool.parameters.properties.text.type, 'string')
+  assert.equal(tool.parameters.properties.targetLanguage.type, 'string')
+  assert.equal(tool.parameters.properties.sourceLanguage.type, 'string')
+  assert.equal(tool.output.schema.type, 'object')
+  assert.equal(tool.output.schema.additionalProperties, false)
+  for (const field of ['text', 'sourceLanguage', 'targetLanguage', 'provider', 'cached', 'durationMs']) {
+    assert.ok(tool.output.schema.properties[field], `the output schema must declare ${field}`)
+  }
+  assert.ok(tool.output.schema.properties.detectedSourceLanguage)
+  // Additive routing facts: optional, so an older consumer keeps working.
+  assert.equal(tool.output.schema.properties.requestedProvider.type, 'string')
+  assert.equal(tool.output.schema.properties.failover.type, 'boolean')
+  assert.equal(tool.output.schema.required.includes('requestedProvider'), false)
+  assert.equal(tool.output.schema.required.includes('failover'), false)
+  assert.equal(tool.isConcurrencySafe(), true)
+  assert.match(tool.description, /split into provider-sized requests/)
+})
+
+test('tool: execute returns the translation and honours the exec signal', async (t) => {
+  mockFetch(async () => jsonResponse(bingPayload('你好')), t)
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+
+  const value = await tool.execute({ text: 'hello', targetLanguage: 'zh-Hans' }, { signal: undefined })
+  assert.equal(value.text, '你好')
+  assert.equal(value.sourceLanguage, 'auto')
+  assert.equal(value.targetLanguage, 'zh-Hans')
+  assert.equal(value.provider, 'bing')
+  assert.equal(value.cached, false)
+  assert.equal(typeof value.durationMs, 'number')
+
+  const controller = new AbortController()
+  controller.abort()
+  await assert.rejects(tool.execute({ text: 'hello', targetLanguage: 'zh-Hans' }, { signal: controller.signal }))
+})
+
+test('tool: execute carries the additive routing facts on a failover', async (t) => {
+  mockFetch(async (url) => {
+    if (String(url).includes('microsoft')) throw new TypeError('fetch failed')
+    return jsonResponse([[['你好', 'hello', null, null, 10]], null, 'en'])
+  }, t)
+
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+  const value = await tool.execute({ text: 'hello', targetLanguage: 'zh-Hans' }, { signal: undefined })
+
+  assert.equal(value.text, '你好')
+  assert.equal(value.provider, 'google', 'the tool reports the provider that served')
+  assert.equal(value.requestedProvider, 'bing', 'the tool reports the default provider asked for')
+  assert.equal(value.failover, true)
+  assert.equal(typeof value.durationMs, 'number')
+  assert.equal(value.cached, false)
+})
+
+test('tool: execute surfaces the same provider-unreachable code as the panel', async (t) => {
+  mockFetch(async () => {
+    throw new TypeError('fetch failed')
+  }, t)
+
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+  await assert.rejects(
+    tool.execute({ text: 'hello', targetLanguage: 'zh-Hans' }, { signal: undefined }),
+    (error) => {
+      assert.equal(error.code, 'translation-pane/provider-unreachable')
+      assert.equal(error.isDSHRemoteError, true)
+      return true
+    },
+  )
+})
+
+test('concurrency: distinct shipped-translator demands share the same service-wide limit', async () => {
+  let running = 0
+  let peak = 0
+  const translator = fakeTranslator({
+    translate: async (spec) => {
+      running += 1
+      peak = Math.max(peak, running)
+      await new Promise((resolve) => setTimeout(resolve, 8))
+      running -= 1
+      return `translated ${spec.text}`
+    },
+  })
+  const h = harness({ translator, config: { maxConcurrency: 1 } })
+
+  await Promise.all(
+    ['one', 'two', 'three'].map((text) =>
+      h.service.translateRequest({ text, targetLanguage: 'en' }),
+    ),
+  )
+  assert.equal(peak, 1, 'the shipped translator route must share the same global slots')
+})
+
+test('scheduler: FIFO waiters are cancellable and do not consume slots after leaving', async (t) => {
+  let releaseFirst
+  let signalFirstStarted
+  const firstStarted = new Promise((resolve) => {
+    signalFirstStarted = resolve
+  })
+  const started = []
+  mockFetch(async (_url, init) => {
+    const source = JSON.parse(init.body)[0]
+    started.push(source)
+    if (source === 'first') {
+      signalFirstStarted()
+      await new Promise((resolve) => {
+        releaseFirst = resolve
+      })
+    }
+    return jsonResponse(bingPayload(source))
+  }, t)
+
+  const h = harness({ config: { maxConcurrency: 1, maxQueuedRequests: 2 } })
+  const first = h.service.translateRequest({ text: 'first', targetLanguage: 'en' })
+  await firstStarted
+
+  const controller = new AbortController()
+  const second = h.service.translateRequest(
+    { text: 'second', targetLanguage: 'en' },
+    controller.signal,
+  )
+  const third = h.service.translateRequest({ text: 'third', targetLanguage: 'en' })
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal(h.service.describe().queuedRequests, 2)
+
+  controller.abort(new Error('the queued caller no longer wants this result'))
+  await assert.rejects(second, /queued caller no longer wants this result/)
+  assert.equal(h.service.describe().queuedRequests, 1, 'cancellation must remove the waiter immediately')
+
+  releaseFirst()
+  await Promise.all([first, third])
+  assert.deepEqual(started, ['first', 'third'], 'the cancelled demand must never reach the provider')
+  assert.equal(h.service.describe().activeRequests, 0)
+  assert.equal(h.service.describe().queuedRequests, 0)
+})
+
+test('scheduler: a full FIFO queue refuses excess work with the busy code', async (t) => {
+  let releaseFirst
+  let signalFirstStarted
+  const firstStarted = new Promise((resolve) => {
+    signalFirstStarted = resolve
+  })
+  mockFetch(async (_url, init) => {
+    const source = JSON.parse(init.body)[0]
+    if (source === 'first') {
+      signalFirstStarted()
+      await new Promise((resolve) => {
+        releaseFirst = resolve
+      })
+    }
+    return jsonResponse(bingPayload(source))
+  }, t)
+
+  const h = harness({ config: { maxConcurrency: 1, maxQueuedRequests: 1 } })
+  const first = h.service.translateRequest({ text: 'first', targetLanguage: 'en' })
+  await firstStarted
+  const second = h.service.translateRequest({ text: 'second', targetLanguage: 'en' })
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  await assert.rejects(
+    h.service.translateRequest({ text: 'third', targetLanguage: 'en' }),
+    (error) => error.code === 'translation-pane/busy',
+  )
+  assert.equal(h.service.describe().queuedRequests, 1)
+  releaseFirst()
+  await Promise.all([first, second])
+})
+
+test('logging: the source text never reaches the log', async (t) => {
+  mockFetch(async () => jsonResponse(bingPayload('ok')), t)
+  const secret = 'a-very-private-sentence'
+  const h = harness()
+  await h.service.translate({ text: secret, targetLanguage: 'en' })
+  const logged = [...h.logs.debug, ...h.logs.warn].join('\n')
+  assert.ok(logged.length > 0, 'the plugin must log something')
+  assert.equal(logged.includes(secret), false)
+})
+
+test('Remote marker: the descriptor names both methods', () => {
+  const h = harness()
+  const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(h.service), REMOTE_METHODS)
+  assert.ok(descriptor, 'the prototype must carry the Remote method descriptor')
+  const marker = descriptor.value
+  assert.equal(marker.version, 1)
+  assert.ok(Object.isFrozen(marker))
+  assert.ok(Object.isFrozen(marker.methods))
+  assert.deepEqual(
+    marker.methods.map((method) => method.method),
+    ['describe', 'translate'],
+  )
+  for (const method of marker.methods) {
+    assert.equal(method.invocation.kind, 'direct')
+    assert.ok(Object.isFrozen(method))
+  }
+})
+
+test('tool: the registration carries the documented schema', () => {
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+  assert.ok(tool, 'the translate_text tool must be registered')
+  assert.equal(tool.parameters.type, 'object')
+  assert.equal(tool.parameters.additionalProperties, false)
+  assert.deepEqual(tool.parameters.required, ['text', 'targetLanguage'])
+  assert.equal(tool.parameters.properties.text.type, 'string')
+  assert.equal(tool.parameters.properties.targetLanguage.type, 'string')
+  assert.equal(tool.parameters.properties.sourceLanguage.type, 'string')
+  assert.equal(tool.output.schema.type, 'object')
+  assert.equal(tool.output.schema.additionalProperties, false)
+  for (const field of ['text', 'sourceLanguage', 'targetLanguage', 'provider', 'cached', 'durationMs']) {
+    assert.ok(tool.output.schema.properties[field], `the output schema must declare ${field}`)
+  }
+  assert.ok(tool.output.schema.properties.detectedSourceLanguage)
+  // Additive routing facts: optional, so an older consumer keeps working.
+  assert.equal(tool.output.schema.properties.requestedProvider.type, 'string')
+  assert.equal(tool.output.schema.properties.failover.type, 'boolean')
+  assert.equal(tool.output.schema.required.includes('requestedProvider'), false)
+  assert.equal(tool.output.schema.required.includes('failover'), false)
+  assert.equal(tool.isConcurrencySafe(), true)
+  assert.match(tool.description, /split into provider-sized requests/)
+})
+
+test('tool: execute returns the translation and honours the exec signal', async (t) => {
+  mockFetch(async () => jsonResponse(bingPayload('你好')), t)
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+
+  const value = await tool.execute({ text: 'hello', targetLanguage: 'zh-Hans' }, { signal: undefined })
+  assert.equal(value.text, '你好')
+  assert.equal(value.sourceLanguage, 'auto')
+  assert.equal(value.targetLanguage, 'zh-Hans')
+  assert.equal(value.provider, 'bing')
+  assert.equal(value.cached, false)
+  assert.equal(typeof value.durationMs, 'number')
+
+  const controller = new AbortController()
+  controller.abort()
+  await assert.rejects(tool.execute({ text: 'hello', targetLanguage: 'zh-Hans' }, { signal: controller.signal }))
+})
+
+test('tool: execute carries the additive routing facts on a failover', async (t) => {
+  mockFetch(async (url) => {
+    if (String(url).includes('microsoft')) throw new TypeError('fetch failed')
+    return jsonResponse([[['你好', 'hello', null, null, 10]], null, 'en'])
+  }, t)
+
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+  const value = await tool.execute({ text: 'hello', targetLanguage: 'zh-Hans' }, { signal: undefined })
+
+  assert.equal(value.text, '你好')
+  assert.equal(value.provider, 'google', 'the tool reports the provider that served')
+  assert.equal(value.requestedProvider, 'bing', 'the tool reports the default provider asked for')
+  assert.equal(value.failover, true)
+  assert.equal(typeof value.durationMs, 'number')
+  assert.equal(value.cached, false)
+})
+
+test('tool: execute surfaces the same provider-unreachable code as the panel', async (t) => {
+  mockFetch(async () => {
+    throw new TypeError('fetch failed')
+  }, t)
+
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+  await assert.rejects(
+    tool.execute({ text: 'hello', targetLanguage: 'zh-Hans' }, { signal: undefined }),
+    (error) => {
+      assert.equal(error.code, 'translation-pane/provider-unreachable')
+      assert.equal(error.isDSHRemoteError, true)
+      return true
+    },
+  )
+})
+
+test('scheduler: FIFO waiters are cancellable and do not consume slots after leaving', async (t) => {
+  let releaseFirst
+  let signalFirstStarted
+  const firstStarted = new Promise((resolve) => {
+    signalFirstStarted = resolve
+  })
+  const started = []
+  mockFetch(async (_url, init) => {
+    const source = JSON.parse(init.body)[0]
+    started.push(source)
+    if (source === 'first') {
+      signalFirstStarted()
+      await new Promise((resolve) => {
+        releaseFirst = resolve
+      })
+    }
+    return jsonResponse(bingPayload(source))
+  }, t)
+
+  const h = harness({ config: { maxConcurrency: 1, maxQueuedRequests: 2 } })
+  const first = h.service.translateRequest({ text: 'first', targetLanguage: 'en' })
+  await firstStarted
+
+  const controller = new AbortController()
+  const second = h.service.translateRequest(
+    { text: 'second', targetLanguage: 'en' },
+    controller.signal,
+  )
+  const third = h.service.translateRequest({ text: 'third', targetLanguage: 'en' })
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal(h.service.describe().queuedRequests, 2)
+
+  controller.abort(new Error('the queued caller no longer wants this result'))
+  await assert.rejects(second, /queued caller no longer wants this result/)
+  assert.equal(h.service.describe().queuedRequests, 1, 'cancellation must remove the waiter immediately')
+
+  releaseFirst()
+  await Promise.all([first, third])
+  assert.deepEqual(started, ['first', 'third'], 'the cancelled demand must never reach the provider')
+  assert.equal(h.service.describe().activeRequests, 0)
+  assert.equal(h.service.describe().queuedRequests, 0)
+})
+
+test('scheduler: a full FIFO queue refuses excess work with the busy code', async (t) => {
+  let releaseFirst
+  let signalFirstStarted
+  const firstStarted = new Promise((resolve) => {
+    signalFirstStarted = resolve
+  })
+  mockFetch(async (_url, init) => {
+    const source = JSON.parse(init.body)[0]
+    if (source === 'first') {
+      signalFirstStarted()
+      await new Promise((resolve) => {
+        releaseFirst = resolve
+      })
+    }
+    return jsonResponse(bingPayload(source))
+  }, t)
+
+  const h = harness({ config: { maxConcurrency: 1, maxQueuedRequests: 1 } })
+  const first = h.service.translateRequest({ text: 'first', targetLanguage: 'en' })
+  await firstStarted
+  const second = h.service.translateRequest({ text: 'second', targetLanguage: 'en' })
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  await assert.rejects(
+    h.service.translateRequest({ text: 'third', targetLanguage: 'en' }),
+    (error) => error.code === 'translation-pane/busy',
+  )
+  assert.equal(h.service.describe().queuedRequests, 1)
+  releaseFirst()
+  await Promise.all([first, second])
+})
+
+test('logging: the source text never reaches the log', async (t) => {
+  mockFetch(async () => jsonResponse(bingPayload('ok')), t)
+  const secret = 'a-very-private-sentence'
+  const h = harness()
+  await h.service.translate({ text: secret, targetLanguage: 'en' })
+  const logged = [...h.logs.debug, ...h.logs.warn].join('\n')
+  assert.ok(logged.length > 0, 'the plugin must log something')
+  assert.equal(logged.includes(secret), false)
+})
+
+test('Remote marker: the descriptor names both methods', () => {
+  const h = harness()
+  const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(h.service), REMOTE_METHODS)
+  assert.ok(descriptor, 'the prototype must carry the Remote method descriptor')
+  const marker = descriptor.value
+  assert.equal(marker.version, 1)
+  assert.ok(Object.isFrozen(marker))
+  assert.ok(Object.isFrozen(marker.methods))
+  assert.deepEqual(
+    marker.methods.map((method) => method.method),
+    ['describe', 'translate'],
+  )
+  for (const method of marker.methods) {
+    assert.equal(method.invocation.kind, 'direct')
+    assert.ok(Object.isFrozen(method))
+  }
+})
+
+test('tool: the registration carries the documented schema', () => {
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+  assert.ok(tool, 'the translate_text tool must be registered')
+  assert.equal(tool.parameters.type, 'object')
+  assert.equal(tool.parameters.additionalProperties, false)
+  assert.deepEqual(tool.parameters.required, ['text', 'targetLanguage'])
+  assert.equal(tool.parameters.properties.text.type, 'string')
+  assert.equal(tool.parameters.properties.targetLanguage.type, 'string')
+  assert.equal(tool.parameters.properties.sourceLanguage.type, 'string')
+  assert.equal(tool.output.schema.type, 'object')
+  assert.equal(tool.output.schema.additionalProperties, false)
+  for (const field of ['text', 'sourceLanguage', 'targetLanguage', 'provider', 'cached', 'durationMs']) {
+    assert.ok(tool.output.schema.properties[field], `the output schema must declare ${field}`)
+  }
+  assert.ok(tool.output.schema.properties.detectedSourceLanguage)
+  // Additive routing facts: optional, so an older consumer keeps working.
+  assert.equal(tool.output.schema.properties.requestedProvider.type, 'string')
+  assert.equal(tool.output.schema.properties.failover.type, 'boolean')
+  assert.equal(tool.output.schema.required.includes('requestedProvider'), false)
+  assert.equal(tool.output.schema.required.includes('failover'), false)
+  assert.equal(tool.isConcurrencySafe(), true)
+  assert.match(tool.description, /split into provider-sized requests/)
+})
+
+test('tool: execute returns the translation and honours the exec signal', async (t) => {
+  mockFetch(async () => jsonResponse(bingPayload('你好')), t)
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+
+  const value = await tool.execute({ text: 'hello', targetLanguage: 'zh-Hans' }, { signal: undefined })
+  assert.equal(value.text, '你好')
+  assert.equal(value.sourceLanguage, 'auto')
+  assert.equal(value.targetLanguage, 'zh-Hans')
+  assert.equal(value.provider, 'bing')
+  assert.equal(value.cached, false)
+  assert.equal(typeof value.durationMs, 'number')
+
+  const controller = new AbortController()
+  controller.abort()
+  await assert.rejects(tool.execute({ text: 'hello', targetLanguage: 'zh-Hans' }, { signal: controller.signal }))
+})
+
+test('tool: execute carries the additive routing facts on a failover', async (t) => {
+  mockFetch(async (url) => {
+    if (String(url).includes('microsoft')) throw new TypeError('fetch failed')
+    return jsonResponse([[['你好', 'hello', null, null, 10]], null, 'en'])
+  }, t)
+
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+  const value = await tool.execute({ text: 'hello', targetLanguage: 'zh-Hans' }, { signal: undefined })
+
+  assert.equal(value.text, '你好')
+  assert.equal(value.provider, 'google', 'the tool reports the provider that served')
+  assert.equal(value.requestedProvider, 'bing', 'the tool reports the default provider asked for')
+  assert.equal(value.failover, true)
+  assert.equal(typeof value.durationMs, 'number')
+  assert.equal(value.cached, false)
+})
+
+test('tool: execute surfaces the same provider-unreachable code as the panel', async (t) => {
+  mockFetch(async () => {
+    throw new TypeError('fetch failed')
+  }, t)
+
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+  await assert.rejects(
+    tool.execute({ text: 'hello', targetLanguage: 'zh-Hans' }, { signal: undefined }),
+    (error) => {
+      assert.equal(error.code, 'translation-pane/provider-unreachable')
+      assert.equal(error.isDSHRemoteError, true)
+      return true
+    },
+  )
+})
+
+test('scheduler: a full FIFO queue refuses excess work with the busy code', async (t) => {
+  let releaseFirst
+  let signalFirstStarted
+  const firstStarted = new Promise((resolve) => {
+    signalFirstStarted = resolve
+  })
+  mockFetch(async (_url, init) => {
+    const source = JSON.parse(init.body)[0]
+    if (source === 'first') {
+      signalFirstStarted()
+      await new Promise((resolve) => {
+        releaseFirst = resolve
+      })
+    }
+    return jsonResponse(bingPayload(source))
+  }, t)
+
+  const h = harness({ config: { maxConcurrency: 1, maxQueuedRequests: 1 } })
+  const first = h.service.translateRequest({ text: 'first', targetLanguage: 'en' })
+  await firstStarted
+  const second = h.service.translateRequest({ text: 'second', targetLanguage: 'en' })
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  await assert.rejects(
+    h.service.translateRequest({ text: 'third', targetLanguage: 'en' }),
+    (error) => error.code === 'translation-pane/busy',
+  )
+  assert.equal(h.service.describe().queuedRequests, 1)
+  releaseFirst()
+  await Promise.all([first, second])
+})
+
+test('logging: the source text never reaches the log', async (t) => {
+  mockFetch(async () => jsonResponse(bingPayload('ok')), t)
+  const secret = 'a-very-private-sentence'
+  const h = harness()
+  await h.service.translate({ text: secret, targetLanguage: 'en' })
+  const logged = [...h.logs.debug, ...h.logs.warn].join('\n')
+  assert.ok(logged.length > 0, 'the plugin must log something')
+  assert.equal(logged.includes(secret), false)
+})
+
+test('Remote marker: the descriptor names both methods', () => {
+  const h = harness()
+  const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(h.service), REMOTE_METHODS)
+  assert.ok(descriptor, 'the prototype must carry the Remote method descriptor')
+  const marker = descriptor.value
+  assert.equal(marker.version, 1)
+  assert.ok(Object.isFrozen(marker))
+  assert.ok(Object.isFrozen(marker.methods))
+  assert.deepEqual(
+    marker.methods.map((method) => method.method),
+    ['describe', 'translate'],
+  )
+  for (const method of marker.methods) {
+    assert.equal(method.invocation.kind, 'direct')
+    assert.ok(Object.isFrozen(method))
+  }
+})
+
+test('tool: the registration carries the documented schema', () => {
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+  assert.ok(tool, 'the translate_text tool must be registered')
+  assert.equal(tool.parameters.type, 'object')
+  assert.equal(tool.parameters.additionalProperties, false)
+  assert.deepEqual(tool.parameters.required, ['text', 'targetLanguage'])
+  assert.equal(tool.parameters.properties.text.type, 'string')
+  assert.equal(tool.parameters.properties.targetLanguage.type, 'string')
+  assert.equal(tool.parameters.properties.sourceLanguage.type, 'string')
+  assert.equal(tool.output.schema.type, 'object')
+  assert.equal(tool.output.schema.additionalProperties, false)
+  for (const field of ['text', 'sourceLanguage', 'targetLanguage', 'provider', 'cached', 'durationMs']) {
+    assert.ok(tool.output.schema.properties[field], `the output schema must declare ${field}`)
+  }
+  assert.ok(tool.output.schema.properties.detectedSourceLanguage)
+  // Additive routing facts: optional, so an older consumer keeps working.
+  assert.equal(tool.output.schema.properties.requestedProvider.type, 'string')
+  assert.equal(tool.output.schema.properties.failover.type, 'boolean')
+  assert.equal(tool.output.schema.required.includes('requestedProvider'), false)
+  assert.equal(tool.output.schema.required.includes('failover'), false)
+  assert.equal(tool.isConcurrencySafe(), true)
+  assert.match(tool.description, /split into provider-sized requests/)
+})
+
+test('tool: execute returns the translation and honours the exec signal', async (t) => {
+  mockFetch(async () => jsonResponse(bingPayload('你好')), t)
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+
+  const value = await tool.execute({ text: 'hello', targetLanguage: 'zh-Hans' }, { signal: undefined })
+  assert.equal(value.text, '你好')
+  assert.equal(value.sourceLanguage, 'auto')
+  assert.equal(value.targetLanguage, 'zh-Hans')
+  assert.equal(value.provider, 'bing')
+  assert.equal(value.cached, false)
+  assert.equal(typeof value.durationMs, 'number')
+
+  const controller = new AbortController()
+  controller.abort()
+  await assert.rejects(tool.execute({ text: 'hello', targetLanguage: 'zh-Hans' }, { signal: controller.signal }))
+})
+
+test('tool: execute carries the additive routing facts on a failover', async (t) => {
+  mockFetch(async (url) => {
+    if (String(url).includes('microsoft')) throw new TypeError('fetch failed')
+    return jsonResponse([[['你好', 'hello', null, null, 10]], null, 'en'])
+  }, t)
+
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+  const value = await tool.execute({ text: 'hello', targetLanguage: 'zh-Hans' }, { signal: undefined })
+
+  assert.equal(value.text, '你好')
+  assert.equal(value.provider, 'google', 'the tool reports the provider that served')
+  assert.equal(value.requestedProvider, 'bing', 'the tool reports the default provider asked for')
+  assert.equal(value.failover, true)
+  assert.equal(typeof value.durationMs, 'number')
+  assert.equal(value.cached, false)
+})
+
+test('tool: execute surfaces the same provider-unreachable code as the panel', async (t) => {
+  mockFetch(async () => {
+    throw new TypeError('fetch failed')
+  }, t)
+
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+  await assert.rejects(
+    tool.execute({ text: 'hello', targetLanguage: 'zh-Hans' }, { signal: undefined }),
+    (error) => {
+      assert.equal(error.code, 'translation-pane/provider-unreachable')
+      assert.equal(error.isDSHRemoteError, true)
+      return true
+    },
+  )
+})
+
+test('concurrency: a failed fragment prevents queued fragments from being dispatched', async (t) => {
+  const calls = []
+  mockFetch(async (_url, init) => {
+    const fragment = JSON.parse(init.body)[0]
+    calls.push(fragment)
+    if (fragment.startsWith('a')) return new Response('bad request', { status: 400 })
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness({
+    config: { fragmentChars: 50, maxConcurrency: 2, failover: false, maxRetries: 0 },
+  })
+  await assert.rejects(
+    h.service.translate({ text: 'a'.repeat(50) + 'b'.repeat(50) + 'c'.repeat(50) + 'd'.repeat(50), targetLanguage: 'en' }),
+    (error) => error.code === 'translation-pane/provider-error',
+  )
+  assert.equal(calls.length, 2, 'only the already-active fragments may reach the provider')
+  assert.deepEqual(calls, ['a'.repeat(50), 'b'.repeat(50)])
 })
 
 test('logging: the source text never reaches the log', async (t) => {
