@@ -33,6 +33,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Extend the glossary-audit Action with Git-base policy comparison, threshold-change outputs and a pull-request Job Summary table.
 - Show tightened / relaxed impact counts and per-threshold impact in the glossary-audit Action summary and outputs.
 - Let the glossary-audit Action enforce policy-diff regression gates without suppressing its audit or review outputs.
+- Add a standalone glossary-policy-review composite Action that reviews Git policy changes without requiring a glossary audit or sample corpus.
 - Clarify overlap precedence: earliest source position wins, then per-position priority, match length and original entry order.
 
 

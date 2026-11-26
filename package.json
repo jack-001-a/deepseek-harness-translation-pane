@@ -28,7 +28,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "check": "node --check index.js && node --check client.js && node --check src/host/runtime-state.js && node --check src/host/text.js && node --check src/host/markdown.js && node --check src/host/glossary.js && node --check scripts/run-harness-compatibility.mjs && node --check scripts/glossary-cli.mjs && node --check scripts/glossary-sarif.mjs && node --check scripts/run-glossary-action.mjs",
+    "check": "node --check index.js && node --check client.js && node --check src/host/runtime-state.js && node --check src/host/text.js && node --check src/host/markdown.js && node --check src/host/glossary.js && node --check scripts/run-harness-compatibility.mjs && node --check scripts/glossary-cli.mjs && node --check scripts/glossary-sarif.mjs && node --check scripts/run-glossary-action.mjs && node --check scripts/run-glossary-policy-review-action.mjs",
     "test": "node --test",
     "glossary": "node scripts/glossary-cli.mjs"
   },
@@ -55,6 +55,7 @@
     "src/host/glossary.js",
     "scripts/glossary-sarif.mjs",
     "scripts/run-glossary-action.mjs",
+    "scripts/run-glossary-policy-review-action.mjs",
     "config/*.json"
   ],
   "publishConfig": {

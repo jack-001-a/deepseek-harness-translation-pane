@@ -1,0 +1,59 @@
+name: DSH Glossary Policy Review
+description: Compare a quality policy with a Git base revision, summarize threshold impact, and optionally fail on policy changes.
+inputs:
+  policy-file:
+    description: Path to the current version 1 JSON quality policy in the checkout.
+    required: true
+  policy-base-ref:
+    description: Git commit or ref containing the baseline version of policy-file.
+    required: true
+  fail-on:
+    description: none, relaxed, tightened, or any. Controls which threshold changes fail the action.
+    required: false
+    default: none
+outputs:
+  policy-diff-count:
+    description: Total number of added, removed or changed thresholds.
+    value: ${{ steps.review.outputs.policy-diff-count }}
+  policy-diff-added-count:
+    description: Number of thresholds added.
+    value: ${{ steps.review.outputs.policy-diff-added-count }}
+  policy-diff-removed-count:
+    description: Number of thresholds removed.
+    value: ${{ steps.review.outputs.policy-diff-removed-count }}
+  policy-diff-changed-count:
+    description: Number of threshold values changed.
+    value: ${{ steps.review.outputs.policy-diff-changed-count }}
+  policy-diff-tightened-count:
+    description: Number of thresholds tightened.
+    value: ${{ steps.review.outputs.policy-diff-tightened-count }}
+  policy-diff-relaxed-count:
+    description: Number of thresholds relaxed.
+    value: ${{ steps.review.outputs.policy-diff-relaxed-count }}
+  policy-diff-passed:
+    description: Whether the selected policy review gate passed.
+    value: ${{ steps.review.outputs.policy-diff-passed }}
+  policy-diff-exit-code:
+    description: Policy review gate exit code.
+    value: ${{ steps.review.outputs.policy-diff-exit-code }}
+  policy-diff-failure-count:
+    description: Number of threshold changes matched by fail-on.
+    value: ${{ steps.review.outputs.policy-diff-failure-count }}
+  policy-schema-changed:
+    description: Whether the JSON Schema reference changed.
+    value: ${{ steps.review.outputs.policy-schema-changed }}
+  policy-diff-base-commit:
+    description: Resolved full Git commit SHA used as the baseline.
+    value: ${{ steps.review.outputs.policy-diff-base-commit }}
+runs:
+  using: composite
+  steps:
+    - id: review
+      name: Review quality policy changes
+      shell: bash
+      env:
+        ACTION_ROOT: ${{ github.action_path }}
+        INPUT_POLICY_FILE: ${{ inputs.policy-file }}
+        INPUT_POLICY_BASE_REF: ${{ inputs.policy-base-ref }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+      run: node "$ACTION_ROOT/../../../scripts/run-glossary-policy-review-action.mjs"

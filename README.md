@@ -463,7 +463,38 @@ steps:
 ```
 
 Uploading requires `security-events: write` and a repository where Code
-Scanning is available. See the [GitHub SARIF upload guide](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file).
+Scanning is available.
+
+### Standalone quality policy review Action
+
+When a workflow only needs to review policy changes, use the dedicated
+`.github/actions/glossary-policy-review` Action. Unlike the glossary-audit
+Action, it does not require a glossary or source sample and does not run an
+audit. It reads the baseline policy from the selected Git commit, emits the
+same tightened / relaxed threshold summary, and can gate changes independently.
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+    with:
+      fetch-depth: 0
+  - uses: actions/setup-node@v7
+    with:
+      node-version: 22
+  - name: Review glossary quality policy
+    id: policy-review
+    uses: ./.github/actions/glossary-policy-review
+    with:
+      policy-file: ./config/glossary-policy.json
+      policy-base-ref: ${{ github.event.pull_request.base.sha }}
+      fail-on: relaxed
+```
+
+The Action exposes added, removed, changed, tightened and relaxed counts,
+the resolved baseline commit, gate result and exit code. The full change table
+is appended to `GITHUB_STEP_SUMMARY`, including when the selected gate fails.
+As with the glossary-audit Action, the base commit must be available in the
+checkout (`fetch-depth: 0`). See the [GitHub SARIF upload guide](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file).
 The installed package also exposes the `dsh-translation-glossary` executable.
 
 
