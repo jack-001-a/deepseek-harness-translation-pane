@@ -397,8 +397,95 @@ export function splitText(text, maxChars) {
  * @param value - the raw header value.
  * @returns the delay in milliseconds, or `undefined` when absent or unusable.
  */
-const HTTP_DATE_PATTERN =
-  /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT|(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), \d{2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2} \d{2}:\d{2}:\d{2} GMT|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (?: [1-9]|[12]\d|3[01]) \d{2}:\d{2}:\d{2} \d{4})$/
+const HTTP_DATE_MONTHS = Object.freeze({
+  Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
+  Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
+})
+const HTTP_DATE_WEEKDAYS = Object.freeze({
+  Sun: 0, Sunday: 0,
+  Mon: 1, Monday: 1,
+  Tue: 2, Tuesday: 2,
+  Wed: 3, Wednesday: 3,
+  Thu: 4, Thursday: 4,
+  Fri: 5, Friday: 5,
+  Sat: 6, Saturday: 6,
+})
+const IMF_FIXDATE_PATTERN =
+  /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat), (\d{2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{4}) (\d{2}):(\d{2}):(\d{2}) GMT$/
+const RFC850_DATE_PATTERN =
+  /^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday), (\d{2})-(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-(\d{2}) (\d{2}):(\d{2}):(\d{2}) GMT$/
+const ASCTIME_DATE_PATTERN =
+  /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ( [1-9]|[12]\d|3[01]) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/
+
+function makeHttpDateTimestamp(weekdayName, dayText, monthName, year, hourText, minuteText, secondText) {
+  const month = HTTP_DATE_MONTHS[monthName]
+  const expectedWeekday = HTTP_DATE_WEEKDAYS[weekdayName]
+  const day = Number(dayText)
+  const hour = Number(hourText)
+  const minute = Number(minuteText)
+  const second = Number(secondText)
+  if (
+    month === undefined ||
+    expectedWeekday === undefined ||
+    !Number.isInteger(year) ||
+    day < 1 || day > 31 ||
+    hour < 0 || hour > 23 ||
+    minute < 0 || minute > 59 ||
+    second < 0 || second > 59
+  ) return undefined
+
+  const timestamp = Date.UTC(year, month, day, hour, minute, second)
+  const date = new Date(timestamp)
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month ||
+    date.getUTCDate() !== day ||
+    date.getUTCHours() !== hour ||
+    date.getUTCMinutes() !== minute ||
+    date.getUTCSeconds() !== second ||
+    date.getUTCDay() !== expectedWeekday
+  ) return undefined
+  return timestamp
+}
+
+function parseHttpDate(value) {
+  let match = IMF_FIXDATE_PATTERN.exec(value)
+  if (match) {
+    return makeHttpDateTimestamp(
+      match[1], match[2], match[3], Number(match[4]), match[5], match[6], match[7],
+    )
+  }
+
+  match = RFC850_DATE_PATTERN.exec(value)
+  if (match) {
+    const currentYear = new Date(Date.now()).getUTCFullYear()
+    let year = Math.floor(currentYear / 100) * 100 + Number(match[4])
+    const candidate = Date.UTC(
+      year,
+      HTTP_DATE_MONTHS[match[3]],
+      Number(match[2]),
+      Number(match[5]),
+      Number(match[6]),
+      Number(match[7]),
+    )
+    const fiftyYearsFromNow = new Date(Date.now())
+    fiftyYearsFromNow.setUTCFullYear(fiftyYearsFromNow.getUTCFullYear() + 50)
+    // RFC 850's obsolete two-digit year form means the most recent matching
+    // past year when the initial interpretation would be over 50 years ahead.
+    if (candidate > fiftyYearsFromNow.getTime()) year -= 100
+    return makeHttpDateTimestamp(
+      match[1], match[2], match[3], year, match[5], match[6], match[7],
+    )
+  }
+
+  match = ASCTIME_DATE_PATTERN.exec(value)
+  if (match) {
+    return makeHttpDateTimestamp(
+      match[1], match[3], match[2], Number(match[7]), match[4], match[5], match[6],
+    )
+  }
+  return undefined
+}
 
 function parseRetryAfter(value) {
   if (typeof value !== 'string') return undefined
@@ -413,12 +500,8 @@ function parseRetryAfter(value) {
     return Number.isFinite(seconds) ? seconds * 1000 : Number.MAX_VALUE
   }
 
-  // Date.parse() accepts non-HTTP strings such as "-1" and "1.5" as historic
-  // dates in some runtimes. Gate it behind the three HTTP-date wire formats
-  // before asking the runtime to validate the actual calendar date.
-  if (!HTTP_DATE_PATTERN.test(trimmed)) return undefined
-  const when = Date.parse(trimmed)
-  if (Number.isNaN(when)) return undefined
+  const when = parseHttpDate(trimmed)
+  if (when === undefined) return undefined
   return Math.max(0, when - Date.now())
 }
 
