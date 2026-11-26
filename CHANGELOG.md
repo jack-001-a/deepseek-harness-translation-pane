@@ -13,6 +13,31 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   destinations, URLs, placeholders, HTML tags, entities and common Markdown
   syntax, then reassembles the original document structure.
 
+- Add an optional, bounded terminology glossary with source/target language
+  scopes, case/whole-word controls, per-term priority, enabled flags and
+  deterministic overlap diagnostics. Matched source terms are substituted
+  locally and are not sent to translation providers.
+- Add versioned JSON glossary import/export and live Host-session activation;
+  glossary changes invalidate cached translations and cancel in-flight work.
+- Add the `dsh-translation-glossary` CLI for CI validation, structured diagnostics and local replacement previews; previews make no provider requests.
+- Add glossary revision diffing to report added, removed, changed and reordered rules with machine-readable output.
+- Add a glossary match explanation command with occurrence offsets, overlap blockers, language-scope and boundary diagnostics, and a local preview.
+- Add glossary coverage auditing for sample corpora, including active, unused, shadowed and out-of-scope rule counts with JSON output.
+- Add optional audit CI failure policies for unused, shadowed, pattern-mismatched and out-of-scope rules.
+- Emit GitHub Code Scanning-compatible SARIF 2.1.0 reports and add a reusable glossary-audit composite action.
+- Add safe glossary normalization to a separate output file and emit GitHub Actions annotations plus a Job Summary.
+- Add versioned glossary quality policies with coverage and finding thresholds for CLI and GitHub Actions.
+- Publish a JSON Schema 2020-12 definition for quality policy files and editor validation.
+- Add a standalone `policy validate` command to check quality policy files without running a glossary audit.
+- Add strict, balanced and permissive quality policy starter presets with safe non-overwriting file creation.
+- Add a quality policy diff command to review threshold and schema-reference changes, classify tightened versus relaxed gates, and optionally fail CI on selected changes.
+- Extend the glossary-audit Action with Git-base policy comparison, threshold-change outputs and a pull-request Job Summary table.
+- Show tightened / relaxed impact counts and per-threshold impact in the glossary-audit Action summary and outputs.
+- Let the glossary-audit Action enforce policy-diff regression gates without suppressing its audit or review outputs.
+- Add a standalone glossary-policy-review composite Action that reviews Git policy changes without requiring a glossary audit or sample corpus.
+- Detect newly added and deleted policy files as explicit lifecycle diffs; fail when the policy file is absent from both compared revisions.
+- Clarify overlap precedence: earliest source position wins, then per-position priority, match length and original entry order.
+
 ### Fixed
 
 - Require integer values for integer-valued configuration options, so fractional
