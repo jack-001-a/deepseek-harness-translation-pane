@@ -148,7 +148,90 @@ export function markdownSegments(source) {
     const fenceChar = opening[1][0]
     const fenceLength = opening[1].length
     const fenceUnit = fenceChar === '\x60' ? '\\x60' : '~'
-    const closingPattern = new RegExp('^ {0,3}' + fenceUnit + '{' + fenceLength + ',}[ \\t]* * grapheme fits. Oversized graphemes may be divided between code points, but
+    const closingPattern = new RegExp('^ {0,3}' + fenceUnit + '{' + fenceLength + ',}[ \\t]*$')
+    let cursor = newline < 0 ? source.length : newline + 1
+    let fenceEnd = source.length
+    while (cursor < source.length) {
+      const nextNewline = source.indexOf('\\n', cursor)
+      const nextEnd = nextNewline < 0 ? source.length : nextNewline
+      let candidate = source.slice(cursor, nextEnd)
+      if (candidate.endsWith('\\r')) candidate = candidate.slice(0, -1)
+      if (closingPattern.test(candidate)) {
+        fenceEnd = nextNewline < 0 ? nextEnd : nextNewline + 1
+        break
+      }
+      if (nextNewline < 0) break
+      cursor = nextNewline + 1
+    }
+    add(lineStart, fenceEnd)
+    lineStart = fenceEnd
+  }
+
+  // Inline code, placeholders, HTML, links, URLs and entities are opaque.
+  addMatches(/(\\x60+)[^\\n]*?\\1/g)
+  addMatches(/\\{\\{[\\s\\S]*?\\}\\}/g)
+  addMatches(/\\$\\{[^}\\n]*\\}/g)
+  addMatches(/<\\/?[A-Za-z][^>\\n]*>/g)
+  addMatches(/<https?:\\/\\/[^>\\s]+>/gi)
+  addMatches(/https?:\\/\\/[^\\s<>()]+/gi)
+  addMatches(/&(?:#\\d+|#x[\\da-f]+|[a-z][\\w]+);/gi)
+
+  // Keep link labels translatable while freezing link punctuation and target.
+  const links = /(!?)\\[([^\\]\\n]*)\\]\\((?:<[^>\\n]*>|[^)\\n])*\\)/g
+  for (const match of source.matchAll(links)) {
+    const linkStart = match.index
+    const linkEnd = linkStart + match[0].length
+    if (match[1] === '!') {
+      add(linkStart, linkEnd)
+      continue
+    }
+    const labelStart = linkStart + 1
+    const labelEnd = labelStart + match[2].length
+    add(linkStart, labelStart)
+    add(labelEnd, linkEnd)
+  }
+
+  // Protect common block prefixes and standalone thematic-break lines.
+  addMatches(/^ {0,3}(?:#{1,6}[ \\t]+|>[ \\t]?|(?:[-+*]|\\d+[.)])[ \\t]+)(?:\\[[ xX]\\][ \\t]+)?/gm)
+  addMatches(/^ {0,3}(?:(?:\\*|_|-)[ \\t]*){3,}[ \\t]*$/gm)
+  // Formatting delimiters are protected separately from their prose.
+  addMatches(/\\*\\*|__|~~|(?<!\\w)\\*(?=\\S)|(?<=\\S)\\*(?!\\w)|(?<!\\w)_(?=\\S)|(?<=\\S)_(?!\\w)/g)
+
+  ranges.sort((a, b) => a.start - b.start || a.end - b.end)
+  const merged = []
+  for (const range of ranges) {
+    const previous = merged.at(-1)
+    if (previous && range.start <= previous.end) {
+      previous.end = Math.max(previous.end, range.end)
+    } else {
+      merged.push({ ...range })
+    }
+  }
+
+  const segments = []
+  const append = (text, translate) => {
+    if (text.length === 0) return
+    const shouldTranslate = translate && /\\S/u.test(text)
+    const previous = segments.at(-1)
+    if (previous && previous.translate === shouldTranslate) {
+      previous.text += text
+    } else {
+      segments.push({ text, translate: shouldTranslate })
+    }
+  }
+  let offset = 0
+  for (const range of merged) {
+    append(source.slice(offset, range.start), true)
+    append(source.slice(range.start, range.end), false)
+    offset = range.end
+  }
+  append(source.slice(offset), true)
+  return segments
+}
+
+/**
+ * Keep fragment boundaries on grapheme boundaries whenever the complete
+ * grapheme fits. Oversized graphemes may be divided between code points, but
  * never inside a UTF-16 surrogate pair.
  * @param text - the remaining source text.
  * @param boundary - proposed UTF-16 boundary.
