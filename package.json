@@ -28,8 +28,9 @@
     "node": ">=22"
   },
   "scripts": {
-    "check": "node --check index.js && node --check client.js && node --check src/host/runtime-state.js && node --check src/host/text.js && node --check src/host/markdown.js && node --check src/host/glossary.js && node --check scripts/run-harness-compatibility.mjs",
-    "test": "node --test"
+    "check": "node --check index.js && node --check client.js && node --check src/host/runtime-state.js && node --check src/host/text.js && node --check src/host/markdown.js && node --check src/host/glossary.js && node --check scripts/run-harness-compatibility.mjs && node --check scripts/glossary-cli.mjs",
+    "test": "node --test",
+    "glossary": "node scripts/glossary-cli.mjs"
   },
   "exports": {
     ".": "./index.js",
@@ -51,7 +52,8 @@
     "src/host/runtime-state.js",
     "src/host/text.js",
     "src/host/markdown.js",
-    "src/host/glossary.js"
+    "src/host/glossary.js",
+    "scripts/glossary-cli.mjs"
   ],
   "publishConfig": {
     "access": "public"
@@ -70,5 +72,8 @@
         "@deepseek-ai/dsh-client-locale"
       ]
     }
+  },
+  "bin": {
+    "dsh-translation-glossary": "./scripts/glossary-cli.mjs"
   }
 }
