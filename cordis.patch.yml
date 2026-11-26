@@ -50,3 +50,6 @@
         rateLimitPerMinute: 60
         # Fragments of one long request dispatched at the same time.
         maxConcurrency: 3
+        # FIFO provider attempts waiting for a slot. Set to 0 to reject instead
+        # of queueing when every concurrency slot is occupied.
+        maxQueuedRequests: 24
