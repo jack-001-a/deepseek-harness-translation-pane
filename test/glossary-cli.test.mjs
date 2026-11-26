@@ -208,7 +208,7 @@ test('diff supports one stdin input and rejects two stdin inputs', (t) => {
 test('explain shows applied and shadowed occurrences using Host precedence', (t) => {
   const path = fixture(t, JSON.stringify([
     { source: 'DeepSeek', target: '深度求索', sourceLanguage: 'en', targetLanguage: 'zh-Hans' },
-    { source: 'Seek API', target: '搜索接口', sourceLanguage: 'en', targetLanguage: 'zh-Hans', priority: 100 },
+    { source: 'Seek API', target: '搜索接口', sourceLanguage: 'en', targetLanguage: 'zh-Hans', wholeWord: false, priority: 100 },
     { source: 'API', target: '接口', sourceLanguage: 'en', targetLanguage: 'zh-Hans' },
   ]))
   const result = runCli([

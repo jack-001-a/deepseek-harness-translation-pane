@@ -348,6 +348,7 @@ function diff(args) {
 
 
 function literalPositions(source, term) {
+  const escaped = term.replace(/[.*+?^\${}()|[\]\\]/g, '\\function literalPositions(source, term) {
   const foldedSource = source.toLowerCase()
   const foldedTerm = term.toLowerCase()
   const positions = []
@@ -359,6 +360,8 @@ function literalPositions(source, term) {
     cursor = index + Math.max(1, foldedTerm.length)
   }
   return positions
+}')
+  return [...source.matchAll(new RegExp(escaped, 'giu'))].map((match) => match.index)
 }
 
 function explainMatches(sourceText, entries, languages) {
