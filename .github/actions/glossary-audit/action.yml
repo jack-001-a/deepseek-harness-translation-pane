@@ -59,6 +59,12 @@ outputs:
   policy-diff-changed-count:
     description: Number of threshold values changed compared with policy-base-ref.
     value: ${{ steps.audit.outputs.policy-diff-changed-count }}
+  policy-diff-tightened-count:
+    description: Number of quality thresholds tightened compared with policy-base-ref.
+    value: ${{ steps.audit.outputs.policy-diff-tightened-count }}
+  policy-diff-relaxed-count:
+    description: Number of quality thresholds relaxed compared with policy-base-ref.
+    value: ${{ steps.audit.outputs.policy-diff-relaxed-count }}
   policy-schema-changed:
     description: Whether the JSON Schema reference changed compared with policy-base-ref.
     value: ${{ steps.audit.outputs.policy-schema-changed }}

@@ -162,7 +162,10 @@ if (summaryFile) {
   appendFileSync(summaryFile, summaryLines.join('\n'), 'utf8')
 }
 
-const policyDiffCounts = { added: 0, removed: 0, changed: 0, total: 0, schemaChanged: false }
+const policyDiffCounts = {
+  added: 0, removed: 0, changed: 0, total: 0,
+  tightened: 0, relaxed: 0, schemaChanged: false,
+}
 if (policyBaseRef) {
   if (!policyFile) {
     throw new Error('INPUT_POLICY_BASE_REF requires INPUT_POLICY_FILE.')
@@ -213,6 +216,8 @@ if (policyBaseRef) {
     policyDiffCounts.added = policyDiff.summary.added
     policyDiffCounts.removed = policyDiff.summary.removed
     policyDiffCounts.changed = policyDiff.summary.changed
+    policyDiffCounts.tightened = policyDiff.summary.tightened
+    policyDiffCounts.relaxed = policyDiff.summary.relaxed
     policyDiffCounts.total = policyDiffCounts.added + policyDiffCounts.removed + policyDiffCounts.changed
     policyDiffCounts.schemaChanged = policyDiff.schemaChanged === true
 
@@ -220,6 +225,8 @@ if (policyBaseRef) {
     output('policy-diff-added-count', policyDiffCounts.added, githubOutput)
     output('policy-diff-removed-count', policyDiffCounts.removed, githubOutput)
     output('policy-diff-changed-count', policyDiffCounts.changed, githubOutput)
+    output('policy-diff-tightened-count', policyDiffCounts.tightened, githubOutput)
+    output('policy-diff-relaxed-count', policyDiffCounts.relaxed, githubOutput)
     output('policy-schema-changed', policyDiffCounts.schemaChanged, githubOutput)
 
     if (summaryFile) {
@@ -233,13 +240,15 @@ if (policyBaseRef) {
         '- **Base commit:** ' + tick + baseCommit.slice(0, 12) + tick,
         '- **Threshold changes:** ' + policyDiffCounts.total + ' (' +
           policyDiffCounts.added + ' added, ' + policyDiffCounts.removed + ' removed, ' +
-          policyDiffCounts.changed + ' changed)',
+          policyDiffCounts.changed + ' changed; ' + policyDiffCounts.tightened +
+          ' tightened, ' + policyDiffCounts.relaxed + ' relaxed)',
       ]
       if (changed.length) {
-        lines.push('', '| Threshold | Base value | PR value | Change |', '| --- | ---: | ---: | --- |')
+        lines.push('', '| Threshold | Base value | PR value | Impact | Change |', '| --- | ---: | ---: | --- | --- |')
         for (const item of changed) {
           lines.push('| ' + tick + markdownEscape(item.field) + tick + ' | ' +
-            display(item.before) + ' | ' + display(item.after) + ' | ' + item.change + ' |')
+            display(item.before) + ' | ' + display(item.after) + ' | ' +
+            item.impact + ' | ' + item.change + ' |')
         }
       } else {
         lines.push('', 'No threshold changes detected.')
