@@ -359,6 +359,11 @@ npm run glossary -- audit path/to/glossary.json \
   --source-language en --target-language zh-Hans \
   --text-file ./samples/source.txt --fail-on any --format json
 
+# Generate a SARIF 2.1.0 report for GitHub Code Scanning.
+npm run glossary -- audit path/to/glossary.json \
+  --source-language en --target-language zh-Hans \
+  --text-file ./samples/source.txt --format sarif --output reports/glossary.sarif
+
 # Read the glossary from stdin.
 cat path/to/glossary.json | npm run glossary -- validate -
 ```
@@ -383,7 +388,48 @@ percentage of source code units replaced by winning local matches. coverage desc
 Use `--fail-on unused|shadowed|pattern-mismatch|out-of-scope|any` to make
 selected findings return exit code 1 for CI; the default `none` preserves a
 successful exit while still reporting findings. The JSON report includes the
-selected policy and its failure reasons. The installed package also exposes the `dsh-translation-glossary` executable.
+selected policy and its failure reasons. `--format sarif` emits SARIF 2.1.0;
+combine it with `--output` to save a report even when the selected gate fails.
+The repository also includes a reusable composite action at
+`.github/actions/glossary-audit`. It requires Node.js 22 or newer and accepts
+a glossary file, source sample, language pair, failure policy and SARIF path.
+Its outputs expose the report path, finding count, audit result and exit code.
+
+The action generates SARIF before enforcing the selected policy. Upload the
+report using GitHub's official uploader, even when the audit step fails, with
+`if: always()`:
+
+```yaml
+permissions:
+  contents: read
+  security-events: write
+
+steps:
+  - uses: actions/checkout@v4
+  - uses: actions/setup-node@v4
+    with:
+      node-version: 22
+  - name: Audit glossary
+    id: glossary-audit
+    uses: ./.github/actions/glossary-audit
+    with:
+      glossary-file: ./config/glossary.json
+      source-file: ./samples/source.txt
+      source-language: en
+      target-language: zh-Hans
+      fail-on: any
+      sarif-file: ./reports/glossary-audit.sarif
+  - name: Upload glossary findings
+    if: always() && steps.glossary-audit.outputs.sarif-file != ''
+    uses: github/codeql-action/upload-sarif@v4
+    with:
+      sarif_file: ${{ steps.glossary-audit.outputs.sarif-file }}
+      category: dsh-glossary-audit
+```
+
+Uploading requires `security-events: write` and a repository where Code
+Scanning is available. See the [GitHub SARIF upload guide](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file).
+The installed package also exposes the `dsh-translation-glossary` executable.
 
 
 ## Install

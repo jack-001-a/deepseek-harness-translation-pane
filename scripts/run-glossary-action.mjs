@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -43,6 +43,10 @@ for (const [name, value] of [
   }
 }
 
+const nodeMajor = Number(process.versions.node.split('.')[0])
+if (nodeMajor < 22) throw new Error('The glossary audit action requires Node.js 22 or newer.')
+
+rmSync(sarifFile, { force: true })
 const result = spawnSync(process.execPath, [
   cliPath, 'audit', glossaryFile, '--text-file', sourceFile,
   '--source-language', sourceLanguage,

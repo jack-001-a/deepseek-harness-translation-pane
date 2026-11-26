@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs'
 
+import { createGlossarySarifReport, writeGlossarySarif } from './glossary-sarif.mjs'
+
 import { glossarySegments, languageScopeMatches, parseGlossaryImport } from '../src/host/glossary.js'
 
 const USAGE = [
   'Usage:',
   '  dsh-translation-glossary validate [file|-] [--format text|json]',
   '  dsh-translation-glossary preview [file|-] (--text <text> | --text-file <path>)',
-  '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json]',
+  '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json|sarif] [--output <path>]',
   '  dsh-translation-glossary diff <before-file|-> <after-file|-> [--format text|json]',
   '  dsh-translation-glossary explain <file|-> (--text <text> | --text-file <path>)',
   '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json]',
@@ -576,14 +578,18 @@ function explain(args) {
 function audit(args) {
   const { positional, options } = parseOptions(
     args,
-    new Set(['format', 'text', 'text-file', 'source-language', 'target-language', 'fail-on']),
+    new Set(['format', 'text', 'text-file', 'source-language', 'target-language', 'fail-on', 'output']),
   )
   if (positional.length !== 1) throw new CliError('audit requires exactly one glossary file (use "-" for stdin).')
   if (Object.hasOwn(options, 'text') === Object.hasOwn(options, 'text-file')) {
     throw new CliError('audit requires exactly one of --text or --text-file.')
   }
   const format = options.format ?? 'text'
-  if (!['text', 'json'].includes(format)) throw new CliError('--format must be "text" or "json".')
+  if (!['text', 'json', 'sarif'].includes(format)) throw new CliError('--format must be "text", "json" or "sarif".')
+  const outputPath = options.output
+  if (outputPath !== undefined && (outputPath.length === 0 || format !== 'sarif')) {
+    throw new CliError('--output is supported only with --format sarif and requires a non-empty path.')
+  }
 
   const failOn = options['fail-on'] ?? 'none'
   const allowedFailOn = new Set(['none', 'unused', 'shadowed', 'pattern-mismatch', 'out-of-scope', 'any'])
@@ -612,7 +618,15 @@ function audit(args) {
       valid: false,
       ...reportValidation(validation),
     }
-    if (format === 'json') writeJson(report)
+    if (format === 'sarif') {
+      const sarif = createGlossarySarifReport({
+        glossaryFile: positional[0],
+        sampleFile: options['text-file'],
+        validation,
+        ciPolicy: { failOn, passed: false, failureReasons: [{ category: 'invalid-glossary', count: validation.errors.length }] },
+      })
+      writeGlossarySarif(sarif, outputPath)
+    } else if (format === 'json') writeJson(report)
     else {
       process.stdout.write('Glossary is invalid; audit was not generated.\n')
       diagnosticLines(validation.errors, 'ERROR')
@@ -730,7 +744,18 @@ function audit(args) {
     note: 'Audit metrics describe only the supplied sample. Coverage is the percentage of UTF-16 source code units replaced by winning local glossary matches; shadowed occurrences are excluded. No machine translation or provider request is performed.',
   }
 
-  if (format === 'json') {
+  if (format === 'sarif') {
+    const sarif = createGlossarySarifReport({
+      glossaryFile: positional[0],
+      sampleFile: options['text-file'],
+      sourceText,
+      validation,
+      rules,
+      summary,
+      ciPolicy,
+    })
+    writeGlossarySarif(sarif, outputPath)
+  } else if (format === 'json') {
     writeJson(report)
   } else {
     process.stdout.write('Glossary coverage audit (no provider calls)\n')

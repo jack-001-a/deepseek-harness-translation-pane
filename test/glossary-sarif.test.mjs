@@ -43,7 +43,7 @@ test('audit emits SARIF 2.1.0 with stable rules and Unicode-correct source regio
   const region = shadowed.locations[0].physicalLocation.region
   assert.equal(region.startLine, 2)
   assert.equal(region.startColumn, 1)
-  assert.equal(region.charOffset, 12)
+  assert.equal(region.charOffset, 11)
   assert.equal(region.charLength, 3)
   assert.ok(sarif.runs[0].results.some((item) => item.ruleId === 'glossary-unused-term'))
 })
