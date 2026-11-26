@@ -102,8 +102,11 @@ Host therefore:
   response, so an answer cannot appear beside text that was not submitted.
 
 Fragments of one long document are dispatched with bounded concurrency rather
-than one at a time, so a large input is not many times slower than it needs to
-be.
+than one at a time. A FIFO semaphore applies the same `maxConcurrency` limit
+across all simultaneous demands and both provider routes. The waiting queue is
+bounded by `maxQueuedRequests`; excess work fails clearly with
+`translation-pane/busy`, while cancelled waiters are removed immediately and
+do not consume provider-rate tokens.
 
 ### Long input
 
@@ -254,6 +257,7 @@ Positive numeric settings are normalized to nonzero integers, and timer-based se
     cacheMaxBytes: 8388608
     rateLimitPerMinute: 60
     maxConcurrency: 3
+    maxQueuedRequests: 24
 ```
 
 | Key | Default | Meaning |
@@ -273,7 +277,8 @@ Positive numeric settings are normalized to nonzero integers, and timer-based se
 | `cacheSize` | `64` | Maximum number of finished translations retained; `0` disables the cache |
 | `cacheMaxBytes` | `8388608` | Approximate UTF-8 byte budget for retained keys and translations, plus per-entry overhead; `0` disables the cache |
 | `rateLimitPerMinute` | `60` | Token bucket across all callers |
-| `maxConcurrency` | `3` | Fragments of one long request in flight at once |
+| `maxConcurrency` | `3` | Provider attempts active across the whole service at once |
+| `maxQueuedRequests` | `24` | FIFO provider attempts waiting for a slot; `0` disables waiting |
 
 ## Install
 
