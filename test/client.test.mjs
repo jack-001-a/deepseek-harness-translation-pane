@@ -860,6 +860,12 @@ test('the glossary editor imports JSON and applies it through the Host', async (
   loadPluginState = await loadPlugin()
   let submitted
   const { mounted } = mountPanel({
+    translate: (args) => ({
+      text: 'old-glossary:' + args.text,
+      provider: 'bing',
+      cached: false,
+      durationMs: 1,
+    }),
     setGlossary: (args) => {
       submitted = args.payload
       const parsed = JSON.parse(args.payload)
@@ -872,6 +878,11 @@ test('the glossary editor imports JSON and applies it through the Host', async (
     },
   })
   await flushPanel()
+  await typeSource(mounted, 'API docs')
+  translateButton(mounted.tree).props.onClick()
+  await flushPanel()
+  const resultRegion = findOne(mounted.tree, (node) => node.props?.role === 'region', 'the result region')
+  assert.match(textOf(resultRegion), /old-glossary:API docs/)
 
   const editor = findOne(
     mounted.tree,
@@ -901,6 +912,7 @@ test('the glossary editor imports JSON and applies it through the Host', async (
   await flushPanel()
 
   assert.equal(JSON.parse(submitted).glossary[0].sourceLanguage, 'en')
+  assert.equal(textOf(resultRegion).includes('old-glossary:'), false, 'a previous translation must be cleared after glossary activation')
   assert.match(textOf(mounted.tree), /1 glossary warnings need review/)
   assert.match(textOf(mounted.tree), /Overlap/)
 })
