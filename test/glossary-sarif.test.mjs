@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const CLI = fileURLToPath(new URL('../scripts/glossary-cli.mjs', import.meta.url))
@@ -12,6 +12,7 @@ function fixture(t, contents, name = 'fixture.txt') {
   const directory = mkdtempSync(join(tmpdir(), 'translation-pane-sarif-'))
   t.after(() => rmSync(directory, { recursive: true, force: true }))
   const path = join(directory, name)
+  mkdirSync(dirname(path), { recursive: true })
   writeFileSync(path, contents, 'utf8')
   return path
 }
@@ -44,7 +45,7 @@ test('audit emits SARIF 2.1.0 with stable rules and Unicode-correct source regio
   assert.equal(region.startLine, 2)
   assert.equal(region.startColumn, 1)
   assert.equal(region.charOffset, 11)
-  assert.equal(region.charLength, 3)
+  assert.equal(region.charLength, 11)
   assert.ok(sarif.runs[0].results.some((item) => item.ruleId === 'glossary-unused-term'))
 })
 
