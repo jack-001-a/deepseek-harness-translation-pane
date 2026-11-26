@@ -230,6 +230,7 @@ matters: only the second one is fixed by checking that the Host is running.
 Tunables live in the profile patch so they survive upgrades. Every key is
 optional — the Host falls back to the documented default when a key is absent
 or invalid.
+Positive numeric settings are normalized to nonzero integers, and timer-based settings are capped at Node's maximum supported timer delay (2,147,483,647 ms).
 
 ```yaml
 - id: ybbmm-dsh-translation-pane
