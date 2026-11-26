@@ -74,8 +74,9 @@ Host therefore:
   (`providerCooldownMs`) that keeps later requests off a provider known to be
   dead. See [Provider failover and health](#provider-failover-and-health).
 - **retries** transient failures only — network errors, HTTP `429` and HTTP
-  `5xx` — with exponential back-off and jitter, honouring a `Retry-After`
-  header. Every other `4xx` fails immediately instead of burning the budget.
+  `5xx` — with exponential back-off and jitter. A valid `Retry-After` delay
+  takes precedence over the local back-off ceiling; the whole-request deadline
+  remains authoritative. Every other `4xx` fails immediately instead of burning the budget.
   The retry budget applies when a second provider is not available (the
   shipped-translator route, or `failover: false`); with two providers each is
   tried once, because the other provider is the better retry.
