@@ -400,11 +400,6 @@ export function splitText(text, maxChars) {
   return fragments
 }
 
-/**
- * Read a `Retry-After` header as a delay.
- * @param value - the raw header value.
- * @returns the delay in milliseconds, or `undefined` when absent or unusable.
- */
 const HTTP_DATE_MONTHS = Object.freeze({
   Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
   Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
@@ -501,6 +496,11 @@ function parseHttpDate(value) {
   return undefined
 }
 
+/**
+ * Read a `Retry-After` header as a delay.
+ * @param value - the raw header value.
+ * @returns the delay in milliseconds, or `undefined` when absent or unusable.
+ */
 function parseRetryAfter(value) {
   if (typeof value !== 'string') return undefined
   const trimmed = value.trim()
