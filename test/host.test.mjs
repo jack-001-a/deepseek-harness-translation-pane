@@ -345,6 +345,7 @@ test('describe: it reports the routing facts the browser needs', () => {
     'cacheEntries',
     'cacheHits',
     'cacheMisses',
+    'glossaryEntries',
     'failover',
     'fragmentChars',
     'languages',
