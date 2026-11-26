@@ -38,7 +38,6 @@ function createRepository(t, currentPolicy, { basePolicy = { version: 1, minCove
     const contents = typeof currentPolicy === 'string' ? currentPolicy : JSON.stringify(currentPolicy)
     writeFileSync(policy, contents, 'utf8')
   } else rmSync(policy, { force: true })
-  else rmSync(policy, { force: true })
   writeFileSync(output, '', 'utf8')
   writeFileSync(summary, '', 'utf8')
   return { directory, policy, output, summary, baseRef }
