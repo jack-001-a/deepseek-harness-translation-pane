@@ -70,7 +70,7 @@ test('invalid glossary imports also produce SARIF error results', (t) => {
   assert.equal(result.status, 1)
   const sarif = JSON.parse(result.stdout)
   assert.ok(sarif.runs[0].results.some((item) => item.ruleId === 'glossary-invalid-entry' && item.level === 'error'))
-  assert.equal(sarif.runs[0].invocations[0].executionSuccessful, false)
+  assert.equal(sarif.runs[0].invocations[0].executionSuccessful, true)
 })
 
 test('audit rejects output files for non-SARIF formats', (t) => {

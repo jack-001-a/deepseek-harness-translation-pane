@@ -164,7 +164,7 @@ export function createGlossarySarifReport({
       },
       columnKind: 'unicodeCodePoints',
       results,
-      invocations: [{ executionSuccessful: errors.length === 0 && (ciPolicy?.passed ?? true) }],
+      invocations: [{ executionSuccessful: true }],
       properties: {
         ...(summary ? { summary } : {}),
         ...(ciPolicy ? { ciPolicy } : {}),

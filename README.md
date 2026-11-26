@@ -384,7 +384,7 @@ or no source occurrence. Match offsets are zero-based UTF-16 code units. The
 final preview is glossary-only; this command makes no provider requests. `audit`
 aggregates the same decisions over a supplied sample, reporting active, unused,
 fully shadowed, disabled, out-of-scope and pattern-mismatch rules plus the
-percentage of source code units replaced by winning local matches. coverage describes only the supplied sample; it is not a corpus-wide guarantee.
+percentage of source code units replaced by winning local matches. Coverage describes only the supplied sample; it is not a corpus-wide guarantee.
 Use `--fail-on unused|shadowed|pattern-mismatch|out-of-scope|any` to make
 selected findings return exit code 1 for CI; the default `none` preserves a
 successful exit while still reporting findings. The JSON report includes the
@@ -405,8 +405,8 @@ permissions:
   security-events: write
 
 steps:
-  - uses: actions/checkout@v4
-  - uses: actions/setup-node@v4
+  - uses: actions/checkout@v7
+  - uses: actions/setup-node@v7
     with:
       node-version: 22
   - name: Audit glossary
