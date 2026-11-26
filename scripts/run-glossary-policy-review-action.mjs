@@ -23,14 +23,14 @@ function output(name, value, outputFile) {
   if (/[\\r\\n]/u.test(text)) {
     throw new Error('Action output contains a newline: ' + name)
   }
-  appendFileSync(outputFile, name + '=' + text + '\\n', 'utf8')
+  appendFileSync(outputFile, name + '=' + text + '\n', 'utf8')
 }
 
 function markdownEscape(value) {
   return String(value ?? '')
     .replace(/[\\r\\n]+/gu, ' ')
-    .replaceAll('|', '\\\\|')
-    .replaceAll(String.fromCharCode(96), '\\\\' + String.fromCharCode(96))
+    .replaceAll('|', '\\|')
+    .replaceAll(String.fromCharCode(96), '\\' + String.fromCharCode(96))
 }
 
 const githubOutput = required('GITHUB_OUTPUT')
@@ -154,7 +154,7 @@ try {
     lines.push('', report.gate.passed
       ? 'The selected policy review gate passed.'
       : 'The selected policy review gate failed; review the threshold changes before merging.', '')
-    appendFileSync(summaryFile, lines.join('\\n'), 'utf8')
+    appendFileSync(summaryFile, lines.join('\n'), 'utf8')
   }
   exitCode = result.status
 } finally {
