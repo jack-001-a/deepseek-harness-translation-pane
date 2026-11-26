@@ -1670,7 +1670,7 @@ test('translate_text agent tool exposes and forwards JSON format', async (t) => 
   const h = harness()
   const tool = h.tools.find((entry) => entry.name === 'translate_text')
 
-  assert.deepEqual(tool.parameters.properties.format.enum, ['text', 'json'])
+  assert.deepEqual(tool.parameters.properties.format.enum, ['text', 'json', 'markdown'])
   const result = await tool.execute(
     { text: '{"message":"hello"}', targetLanguage: 'zh-Hans', format: 'json' },
     { signal: new AbortController().signal },
