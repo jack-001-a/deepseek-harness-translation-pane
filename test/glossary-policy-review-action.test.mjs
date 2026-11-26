@@ -153,7 +153,7 @@ test('standalone policy review action treats a deleted policy as relaxation and 
 
   const summary = readFileSync(fixture.summary, 'utf8')
   assert.ok(summary.includes('- **Policy file:** deleted'))
-  assert.match(summary, /2 tightened, 2 relaxed/)
+  assert.match(summary, /0 tightened, 2 relaxed/)
   assert.match(summary, /selected policy review gate failed/)
 })
 
