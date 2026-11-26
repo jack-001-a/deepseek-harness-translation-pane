@@ -1,5 +1,4 @@
 /**
-const MAX_TIMER_DELAY_MS = 2_147_483_647
  * Host half of the @ybbmm/dsh-translation-pane bundle.
  *
  * Owns two things:
@@ -68,6 +67,8 @@ const CACHE_ENTRY_OVERHEAD_BYTES = 256
 const DEFAULT_RATE_LIMIT_PER_MINUTE = 60
 /** Fragments dispatched at the same time. */
 const DEFAULT_MAX_CONCURRENCY = 3
+/** Node clamps timer delays above this value to 1 ms; cap configured deadlines. */
+const MAX_TIMER_DELAY_MS = 2_147_483_647
 
 /**
  * Failure codes the browser localizes.
