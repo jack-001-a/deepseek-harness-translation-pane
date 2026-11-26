@@ -60,7 +60,7 @@ try {
   // it there rather than through Cordis's traceable service proxy.
   const remote = TranslationPaneService.prototype['@deepseek-ai/dsh-typert-protocol/remote-methods']
   assert.equal(remote?.version, 1)
-  assert.deepEqual(remote?.methods?.map((entry) => entry.method), ['describe', 'translate'])
+  assert.deepEqual(remote?.methods?.map((entry) => entry.method), ['describe', 'translate', 'setGlossary'])
 
   globalThis.fetch = async (_url, init) => {
     const fragment = JSON.parse(init.body)[0]
@@ -87,6 +87,19 @@ try {
   )
   assert.equal(providerRequests.length, beforeInvalid, 'invalid JSON must fail before provider I/O')
 
+  const glossaryUpdate = service.setGlossary(JSON.stringify({
+    version: 1,
+    glossary: [{ source: 'DeepSeek', target: '深度求索', sourceLanguage: 'en', targetLanguage: 'zh-Hans' }],
+  }))
+  assert.equal(glossaryUpdate.count, 1)
+  const afterGlossary = await service.translate({
+    text: 'DeepSeek',
+    sourceLanguage: 'en',
+    targetLanguage: 'zh-Hans',
+  })
+  assert.equal(afterGlossary.text, '深度求索')
+  assert.deepEqual(providerRequests, ['hello'], 'glossary replacements must remain local to the Host')
+
   outcome = 'PASS'
 } catch (error) {
   failure = error instanceof Error ? error.stack ?? error.message : String(error)
@@ -106,6 +119,8 @@ try {
       'remote-method-descriptor',
       'json-value-only-translation',
       'invalid-json-rejected-before-provider-io',
+      'runtime-glossary-update-over-real-cordis-service',
+      'glossary-source-kept-out-of-provider-io',
     ],
     providerRequests,
     ...(failure === undefined ? {} : { failure }),

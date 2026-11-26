@@ -30,6 +30,13 @@ import { Buffer } from 'node:buffer'
 import { ProviderHealth, TokenBucket, TranslationCache } from './src/host/runtime-state.js'
 import { jsonStringValueTokens, splitText } from './src/host/text.js'
 import { markdownSegments } from './src/host/markdown.js'
+import {
+  countTranslationPlanFragments,
+  createTranslationPlan,
+  inspectGlossary,
+  parseGlossaryImport,
+  renderTranslationPlans,
+} from './src/host/glossary.js'
 export { splitText }
 
 /** Cordis service key and API Gateway wire namespace. */
@@ -511,6 +518,7 @@ export function resolveConfig(config) {
   const raw = config !== null && typeof config === 'object' ? config : {}
   const maxTextChars = positive(raw.maxTextChars, DEFAULT_MAX_TEXT_CHARS)
   const timeoutMs = positive(raw.timeoutMs, DEFAULT_TIMEOUT_MS)
+  const glossaryInspection = inspectGlossary(raw.glossary)
   return Object.freeze({
     bingEndpoint: endpoint(raw.bingEndpoint, DEFAULT_BING_ENDPOINT),
     googleEndpoint: endpoint(raw.googleEndpoint, DEFAULT_GOOGLE_ENDPOINT),
@@ -538,6 +546,9 @@ export function resolveConfig(config) {
     cacheMaxBytes: nonNegative(raw.cacheMaxBytes, DEFAULT_CACHE_MAX_BYTES),
     rateLimitPerMinute: positive(raw.rateLimitPerMinute, DEFAULT_RATE_LIMIT_PER_MINUTE),
     maxConcurrency: positive(raw.maxConcurrency, DEFAULT_MAX_CONCURRENCY),
+    // Terms are bounded and frozen at service creation; matched source terms stay local.
+    glossary: glossaryInspection.entries,
+    glossaryWarnings: Object.freeze([...glossaryInspection.errors, ...glossaryInspection.warnings]),
     maxQueuedRequests: nonNegative(raw.maxQueuedRequests, DEFAULT_MAX_QUEUED_REQUESTS),
     // The jitter source is injectable so the back-off is exactly testable.
     jitter: typeof raw.jitter === 'function' ? raw.jitter : Math.random,
@@ -568,6 +579,10 @@ export class TranslationPaneService {
     this.health = new ProviderHealth(config.providerCooldownMs, DIRECT_PROVIDERS)
     this.cacheHits = 0
     this.cacheMisses = 0
+    /** Mutable glossary snapshot; edits are scoped to this Host lifetime. */
+    this.glossary = config.glossary
+    this.glossaryWarnings = config.glossaryWarnings
+    this.glossaryRevision = 0
     this.typertRemote = Object.freeze({
       service: this,
       serviceKey: SERVICE_KEY,
@@ -602,12 +617,64 @@ export class TranslationPaneService {
       cacheEntries: this.cache.size,
       cacheHits: this.cacheHits,
       cacheMisses: this.cacheMisses,
+      glossaryEntries: this.glossary.length,
+      glossary: this.glossary.map((entry) => ({
+        source: entry.source,
+        target: entry.target,
+        sourceLanguage: entry.sourceLanguage,
+        targetLanguage: entry.targetLanguage,
+        matchCase: entry.matchCase,
+        wholeWord: entry.wholeWord,
+        enabled: entry.enabled,
+        priority: entry.priority,
+      })),
+      glossaryWarnings: this.glossaryWarnings,
       // Plain data, computed from what was observed so far; this call never
       // probes the network or awaits anything. The translator route owns its
       // own routing, so it reports no direct-provider health.
       providerHealth: route === 'direct' ? this.health.snapshot() : {},
       // Whether a failed provider is retried automatically on another one.
       failover: route === 'direct' && this.config.failover,
+    }
+  }
+
+  /**
+   * Import and activate a validated glossary JSON document for this Host session.
+   * The current in-flight requests are cancelled and cached results invalidated,
+   * so later translations cannot reuse outputs from the previous terminology.
+   * @param payload - versioned or legacy glossary JSON text.
+   * @returns active entries and any non-fatal overlap/duplicate warnings.
+   */
+  setGlossary(payload) {
+    const inspection = parseGlossaryImport(payload)
+    if (inspection.errors.length > 0) {
+      throw new TranslationPaneError(
+        CODE.invalidRequest,
+        'translationPane: the glossary import contains invalid entries',
+        { errors: inspection.errors },
+      )
+    }
+    this.glossary = inspection.entries
+    this.glossaryWarnings = inspection.warnings
+    this.glossaryRevision += 1
+    for (const entry of this.inflight.values()) {
+      entry.controller.abort(new Error('translationPane: the glossary changed during translation'))
+    }
+    this.cache = new TranslationCache(this.config.cacheSize, this.config.cacheMaxBytes)
+    return {
+      glossary: this.glossary.map((entry) => ({
+        source: entry.source,
+        target: entry.target,
+        sourceLanguage: entry.sourceLanguage,
+        targetLanguage: entry.targetLanguage,
+        matchCase: entry.matchCase,
+        wholeWord: entry.wholeWord,
+        enabled: entry.enabled,
+        priority: entry.priority,
+      })),
+      warnings: this.glossaryWarnings,
+      count: this.glossary.length,
+      revision: this.glossaryRevision,
     }
   }
 
@@ -675,7 +742,7 @@ export class TranslationPaneService {
       }
     }
 
-    const key = `${spec.format}|${spec.providerKey}|${spec.sourceLanguage}|${spec.targetLanguage}|${spec.text}`
+    const key = `${spec.glossaryRevision}|${spec.format}|${spec.providerKey}|${spec.sourceLanguage}|${spec.targetLanguage}|${spec.text}`
     const cached = this.cache.get(key)
     if (cached !== undefined) {
       this.cacheHits += 1
@@ -763,6 +830,8 @@ export class TranslationPaneService {
       // The cache key must name whatever decides the result, so an unnamed
       // provider is keyed apart from every named one.
       providerKey: route === 'direct' ? (requested ?? providers[0]) : (requested ?? 'default'),
+      glossary: this.glossary,
+      glossaryRevision: this.glossaryRevision,
     }
   }
 
@@ -888,17 +957,32 @@ export class TranslationPaneService {
     const deadline = this.deadline(controller.signal, this.config.timeoutMs)
     try {
       const fragmentSize = this.fragmentSize(translator)
-      const groups = spec.format === 'json'
-        ? spec.jsonTokens.map((token) => token.value.length === 0 ? [] : splitText(token.value, fragmentSize))
+      const languages = {
+        sourceLanguage: spec.sourceLanguage,
+        targetLanguage: spec.targetLanguage,
+      }
+      const makePlan = (source) =>
+        createTranslationPlan(source, spec.glossary, fragmentSize, languages)
+      const plans = spec.format === 'json'
+        ? spec.jsonTokens.map((token) => makePlan(token.value))
         : spec.format === 'markdown'
           ? spec.markdownSegments.map((segment) =>
-              segment.translate ? splitText(segment.text, fragmentSize) : [],
+              segment.translate
+                ? makePlan(segment.text)
+                : [{ text: segment.text, translate: false, fragments: [] }],
             )
-          : [splitText(spec.text, fragmentSize)]
-      const fragments = groups.flat()
+          : [makePlan(spec.text)]
+      const fragmentCount = countTranslationPlanFragments(plans)
+      const fragments = plans.flatMap((plan) =>
+        plan.flatMap((segment) => segment.fragments),
+      )
+      if (fragments.length !== fragmentCount) {
+        throw new Error('translationPane: glossary fragment count is inconsistent')
+      }
       const results = fragments.length === 0
         ? []
         : await this.dispatch(fragments, spec, route, translator, deadline.signal)
+      const rendered = renderTranslationPlans(plans, results)
       // The shipped service may resolve a different provider than the caller
       // asked for, and the direct route may fall over to another provider; the
       // providers that actually answered are the ones to report. A long demand
@@ -925,10 +1009,8 @@ export class TranslationPaneService {
       const requestedProvider = spec.requested ?? spec.provider
       return {
         text: spec.format === 'json'
-          ? this.replaceJsonStringValues(spec.text, spec.jsonTokens, groups, results)
-          : spec.format === 'markdown'
-            ? this.replaceMarkdownSegments(spec.markdownSegments, groups, results)
-            : results.map((entry) => entry.text).join(''),
+          ? this.replaceJsonStringValues(spec.text, spec.jsonTokens, rendered.texts)
+          : rendered.texts.join(''),
         sourceLanguage: spec.sourceLanguage,
         ...(detected === undefined ? {} : { detectedSourceLanguage: detected }),
         targetLanguage: spec.targetLanguage,
@@ -954,40 +1036,18 @@ export class TranslationPaneService {
   }
 
   /**
-   * Reassemble translated Markdown prose around untouched syntax segments.
-   * @param segments - the original lossless Markdown segmentation.
-   * @param groups - provider fragments for each segment.
-   * @param results - translated fragment results in dispatch order.
-   * @returns Markdown with prose translated and protected spans unchanged.
-   */
-  replaceMarkdownSegments(segments, groups, results) {
-    let cursor = 0
-    return segments.map((segment, index) => {
-      const count = groups[index].length
-      if (count === 0) return segment.text
-      const translated = results.slice(cursor, cursor + count).map((entry) => entry.text).join('')
-      cursor += count
-      return translated
-    }).join('')
-  }
-
-  /**
    * Replace JSON string values in reverse source order so offsets remain valid.
    * Object keys and non-string JSON tokens are never sent to a provider.
    * @param source - the original JSON document.
    * @param tokens - string-value tokens from the validated source.
-   * @param groups - fragments belonging to each string value.
-   * @param results - translated fragment results in dispatch order.
+   * @param translatedValues - fully reconstructed string values in source order.
    * @returns valid JSON with only string values translated.
    */
-  replaceJsonStringValues(source, tokens, groups, results) {
-    let cursor = 0
-    const replacements = tokens.map((token, index) => {
-      const count = groups[index].length
-      const translated = results.slice(cursor, cursor + count).map((entry) => entry.text).join('')
-      cursor += count
-      return { ...token, encoded: JSON.stringify(count === 0 ? token.value : translated) }
-    })
+  replaceJsonStringValues(source, tokens, translatedValues) {
+    const replacements = tokens.map((token, index) => ({
+      ...token,
+      encoded: JSON.stringify(translatedValues[index] ?? token.value),
+    }))
     let output = source
     for (let index = replacements.length - 1; index >= 0; index -= 1) {
       const token = replacements[index]
@@ -1682,7 +1742,7 @@ export function apply(ctx, config) {
     () =>
       ctx.tools.register({
         name: 'translate_text',
-        description: `Translate text between languages by sending translatable content to the configured machine-translation provider (Microsoft Edge/Bing or Google Translate on the direct route; the configured provider on the shipped-translator route). Tell the user that their text is processed by that external provider before submitting sensitive or confidential content. Use it when the user asks for a translation, or when you need a sentence rendered in another language. Returns only the translation. For JSON input, pass format="json" to preserve keys, structure and non-string values while translating string values only. For Markdown input, pass format="markdown" to translate prose while preserving fenced/inline code, URLs, link destinations, template placeholders, HTML tags, entities and common Markdown syntax. Text up to ${resolved.maxTextChars} characters is accepted; longer translatable text is split into provider-sized requests and translated in order. On the direct endpoint route, if one endpoint cannot be reached and failover is enabled, the other provider may receive the same fragment.`,
+        description: `Translate text between languages by sending translatable content to the configured machine-translation provider (Microsoft Edge/Bing or Google Translate on the direct route; the configured provider on the shipped-translator route). Configured glossary terms are replaced locally with their preferred target wording and are not sent to that provider; only unmatched text is submitted. Tell the user that their text is processed by that external provider before submitting sensitive or confidential content. Use it when the user asks for a translation, or when you need a sentence rendered in another language. Returns only the translation. For JSON input, pass format="json" to preserve keys, structure and non-string values while translating string values only. For Markdown input, pass format="markdown" to translate prose while preserving fenced/inline code, URLs, link destinations, template placeholders, HTML tags, entities and common Markdown syntax. Text up to ${resolved.maxTextChars} characters is accepted; longer translatable text is split into provider-sized requests and translated in order. On the direct endpoint route, if one endpoint cannot be reached and failover is enabled, the other provider may receive the same fragment.`,
         parameters: {
           type: 'object',
           additionalProperties: false,
@@ -1777,6 +1837,7 @@ Object.defineProperty(TranslationPaneService.prototype, REMOTE_METHODS, {
     methods: Object.freeze([
       Object.freeze({ method: 'describe', invocation: Object.freeze({ kind: 'direct' }) }),
       Object.freeze({ method: 'translate', invocation: Object.freeze({ kind: 'direct' }) }),
+      Object.freeze({ method: 'setGlossary', invocation: Object.freeze({ kind: 'direct' }) }),
     ]),
   }),
 })

@@ -311,3 +311,14 @@ test('describe is callable with an empty payload', async () => {
   assert.equal(typeof described.route, 'string')
   assert.equal(typeof described.maxTextChars, 'number')
 })
+
+test('setGlossary is a Gateway-callable Remote method', async () => {
+  const service = harness()
+  const descriptor = deriveDescriptor(service, 'setGlossary', 'translationPane/setGlossary')
+  assert.deepEqual(descriptor.parameters.map((parameter) => parameter.wire), ['payload'])
+  const result = await callRemote(service, 'setGlossary', {
+    payload: JSON.stringify([{ source: 'API', target: '接口' }]),
+  })
+  assert.equal(result.count, 1)
+  assert.equal((await callRemote(service, 'describe', {})).glossary[0].target, '接口')
+})
