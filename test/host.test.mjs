@@ -738,7 +738,15 @@ test('retry: malformed Retry-After values use bounded exponential back-off', asy
     delays.push(ms)
   }
 
-  for (const malformed of ['-1', '1.5', '+2', '1e3', '0x10']) {
+  for (const malformed of [
+    '-1',
+    '1.5',
+    '+2',
+    '1e3',
+    '0x10',
+    'Thursday, 21-Oct-50 07:28:00 GMT',
+    'Fri, 31 Feb 2099 07:28:00 GMT',
+  ]) {
     retryAfter = malformed
     attempts = 0
     delays.length = 0
@@ -771,7 +779,9 @@ test('retry: valid HTTP-date forms are honoured as Retry-After values', async (t
   for (const [index, date] of [
     [0, 'Wed, 21 Oct 2099 07:28:00 GMT'],
     [1, 'Thursday, 21-Oct-49 07:28:00 GMT'],
-    [2, 'Wed Oct 21 07:28:00 2099'],
+    // RFC 850's 50-year rule maps "50" to 2050 in 2026, not 1950.
+    [2, 'Friday, 21-Oct-50 07:28:00 GMT'],
+    [3, 'Wed Oct 21 07:28:00 2099'],
   ]) {
     retryAfter = date
     attempts = 0
