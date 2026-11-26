@@ -282,6 +282,32 @@ test('config: sensible overrides are accepted and unusable values fall back', ()
   assert.equal(resolveConfig({ providerCooldownMs: 0 }).providerCooldownMs, 0)
 })
 
+test('config: positive fractional settings fall back instead of becoming zero', () => {
+  const config = resolveConfig({
+    timeoutMs: 0.5,
+    attemptTimeoutMs: 0.5,
+    maxTextChars: 0.5,
+    fragmentChars: 0.5,
+    retryBaseMs: 0.5,
+    retryMaxMs: 0.5,
+    maxResponseBytes: 0.5,
+    rateLimitPerMinute: 0.5,
+    maxConcurrency: 0.5,
+  })
+
+  assert.equal(config.timeoutMs, 20000)
+  assert.equal(config.attemptTimeoutMs, 3000)
+  assert.equal(config.maxTextChars, 20000)
+  assert.equal(config.fragmentChars, 3000)
+  assert.equal(config.retryBaseMs, 250)
+  assert.equal(config.retryMaxMs, 4000)
+  assert.equal(config.maxResponseBytes, 1024 * 1024)
+  assert.equal(config.rateLimitPerMinute, 60)
+  assert.equal(config.maxConcurrency, 3)
+  assert.ok(config.rateLimitPerMinute >= 1)
+  assert.ok(config.maxConcurrency >= 1)
+})
+
 test('describe: it reports the routing facts the browser needs', () => {
   const h = harness()
   const described = h.service.describe()
