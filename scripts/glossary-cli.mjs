@@ -10,7 +10,7 @@ const USAGE = [
   'Usage:',
   '  dsh-translation-glossary validate [file|-] [--format text|json]',
   '  dsh-translation-glossary policy validate <policy-file> [--format text|json]',
-  '  dsh-translation-glossary policy diff <before-file> <after-file> [--format text|json]',
+  '  dsh-translation-glossary policy diff <before-file> <after-file> [--format text|json] [--fail-on none|relaxed|tightened|any]',
   '  dsh-translation-glossary fix <file> --output <new-file> [--format text|json]',
   '  dsh-translation-glossary preview [file|-] (--text <text> | --text-file <path>)',
   '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json|sarif] [--output <path>]',
@@ -1030,12 +1030,16 @@ function initializeQualityPolicyCommand(args) {
 
 
 function diffQualityPolicies(args) {
-  const { positional, options } = parseOptions(args, new Set(['format']))
+  const { positional, options } = parseOptions(args, new Set(['format', 'fail-on']))
   if (positional.length !== 2 || positional.includes('-')) {
     throw new CliError('policy diff requires exactly two file paths; stdin is not supported.')
   }
   const format = options.format ?? 'text'
   if (!['text', 'json'].includes(format)) throw new CliError('--format must be "text" or "json".')
+  const failOn = options['fail-on'] ?? 'none'
+  if (!['none', 'relaxed', 'tightened', 'any'].includes(failOn)) {
+    throw new CliError('--fail-on must be "none", "relaxed", "tightened" or "any".')
+  }
 
   function readDocument(filePath) {
     const input = readTextFile(filePath, 'quality policy file')
@@ -1049,6 +1053,16 @@ function diffQualityPolicies(args) {
     return { document, thresholds }
   }
 
+  function classifyImpact(field, change, beforeValue, afterValue) {
+    if (change === 'added') return 'tightened'
+    if (change === 'removed') return 'relaxed'
+    if (change === 'unchanged') return 'unchanged'
+    if (field === 'minCoveragePercent') {
+      return afterValue > beforeValue ? 'tightened' : 'relaxed'
+    }
+    return afterValue < beforeValue ? 'tightened' : 'relaxed'
+  }
+
   const before = readDocument(positional[0])
   const after = readDocument(positional[1])
   const fields = [...new Set([
@@ -1060,9 +1074,11 @@ function diffQualityPolicies(args) {
     const hasAfter = Object.hasOwn(after.thresholds, field)
     const oldValue = hasBefore ? before.thresholds[field] : null
     const newValue = hasAfter ? after.thresholds[field] : null
+    const change = !hasBefore ? 'added' : !hasAfter ? 'removed' : oldValue !== newValue ? 'changed' : 'unchanged'
     return {
       field,
-      change: !hasBefore ? 'added' : !hasAfter ? 'removed' : oldValue !== newValue ? 'changed' : 'unchanged',
+      change,
+      impact: classifyImpact(field, change, oldValue, newValue),
       before: oldValue,
       after: newValue,
     }
@@ -1072,9 +1088,27 @@ function diffQualityPolicies(args) {
     removed: changes.filter((item) => item.change === 'removed').length,
     changed: changes.filter((item) => item.change === 'changed').length,
     unchanged: changes.filter((item) => item.change === 'unchanged').length,
+    tightened: changes.filter((item) => item.impact === 'tightened').length,
+    relaxed: changes.filter((item) => item.impact === 'relaxed').length,
   }
   const schemaBefore = before.document.$schema ?? null
   const schemaAfter = after.document.$schema ?? null
+  const schemaChanged = schemaBefore !== schemaAfter
+  const failureCount = failOn === 'any'
+    ? summary.tightened + summary.relaxed
+    : failOn === 'relaxed'
+      ? summary.relaxed
+      : failOn === 'tightened'
+        ? summary.tightened
+        : 0
+  const gate = {
+    failOn,
+    passed: failureCount === 0,
+    failureCount,
+    failureReasons: failureCount > 0
+      ? [{ category: failOn, count: failureCount }]
+      : [],
+  }
   const report = {
     command: 'policy diff',
     valid: true,
@@ -1084,8 +1118,9 @@ function diffQualityPolicies(args) {
     versionAfter: after.document.version,
     schemaBefore,
     schemaAfter,
-    schemaChanged: schemaBefore !== schemaAfter,
+    schemaChanged,
     summary,
+    gate,
     changes,
   }
 
@@ -1093,25 +1128,31 @@ function diffQualityPolicies(args) {
     writeJson(report)
   } else {
     process.stdout.write('Quality policy diff: ' +
-      (summary.added + summary.removed + summary.changed) + ' threshold changes\n')
-    if (report.schemaChanged) {
+      (summary.added + summary.removed + summary.changed) + ' threshold changes\\n')
+    process.stdout.write(
+      'Impact: ' + summary.tightened + ' tightened; ' + summary.relaxed + ' relaxed\\n',
+    )
+    process.stdout.write('Review gate: --fail-on ' + failOn + ' => ' + (gate.passed ? 'PASS' : 'FAIL') + '\\n')
+    if (schemaChanged) {
       process.stdout.write('Schema reference changed: ' +
-        (schemaBefore ?? '(none)') + ' -> ' + (schemaAfter ?? '(none)') + '\n')
+        (schemaBefore ?? '(none)') + ' -> ' + (schemaAfter ?? '(none)') + '\\n')
     }
     for (const change of changes) {
       if (change.change === 'unchanged') continue
-      if (change.change === 'added') {
-        process.stdout.write('+ ' + change.field + ': ' + change.after + '\n')
-      } else if (change.change === 'removed') {
-        process.stdout.write('- ' + change.field + ': ' + change.before + '\n')
-      } else {
-        process.stdout.write('~ ' + change.field + ': ' + change.before + ' -> ' + change.after + '\n')
-      }
+      const symbol = change.change === 'added' ? '+' : change.change === 'removed' ? '-' : '~'
+      process.stdout.write(symbol + ' ' + change.field + ': ' +
+        (change.before === null ? '(none)' : change.before) + ' -> ' +
+        (change.after === null ? '(none)' : change.after) +
+        ' [' + change.impact + ']\\n')
     }
     process.stdout.write('Added: ' + summary.added + '; removed: ' + summary.removed +
-      '; changed: ' + summary.changed + '; unchanged: ' + summary.unchanged + '\n')
+      '; changed: ' + summary.changed + '; unchanged: ' + summary.unchanged + '\\n')
+    if (!gate.passed) {
+      process.stdout.write('Policy diff gate failed: ' + failureCount +
+        ' threshold change(s) matched --fail-on ' + failOn + '.\\n')
+    }
   }
-  return 0
+  return gate.passed ? 0 : 1
 }
 
 function validateQualityPolicyCommand(args) {

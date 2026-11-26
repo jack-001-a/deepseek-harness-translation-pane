@@ -512,7 +512,13 @@ test('policy diff reports added, removed and changed thresholds plus schema chan
   assert.equal(result.status, 0, result.stderr)
   const report = JSON.parse(result.stdout)
   assert.equal(report.command, 'policy diff')
-  assert.deepEqual(report.summary, { added: 1, removed: 1, changed: 1, unchanged: 0 })
+  assert.deepEqual(report.summary, { added: 1, removed: 1, changed: 1, unchanged: 0, tightened: 2, relaxed: 1 })
+  assert.deepEqual(report.changes.map((item) => [item.field, item.impact]), [
+    ['maxShadowedOccurrences', 'tightened'],
+    ['maxUnusedRules', 'relaxed'],
+    ['minCoveragePercent', 'tightened'],
+  ])
+  assert.deepEqual(report.gate, { failOn: 'none', passed: true, failureCount: 0, failureReasons: [] })
   assert.equal(report.schemaChanged, true)
   assert.equal(report.schemaBefore, null)
   assert.equal(report.schemaAfter, './glossary-policy.schema.json')
@@ -528,7 +534,9 @@ test('policy diff reports unchanged thresholds and rejects invalid inputs', (t) 
   const second = fixture(t, '{"version":1,"minCoveragePercent":80,"maxUnusedRules":2}')
   const unchanged = runCli(['policy', 'diff', first, second, '--format', 'json'])
   assert.equal(unchanged.status, 0, unchanged.stderr)
-  assert.deepEqual(JSON.parse(unchanged.stdout).summary, { added: 0, removed: 0, changed: 0, unchanged: 2 })
+  assert.deepEqual(JSON.parse(unchanged.stdout).summary, {
+    added: 0, removed: 0, changed: 0, unchanged: 2, tightened: 0, relaxed: 0,
+  })
   const oneInput = runCli(['policy', 'diff', first])
   const twoStdin = runCli(['policy', 'diff', '-', '-'])
   const invalid = fixture(t, '{"version":1,"unknown":1}')
@@ -539,6 +547,51 @@ test('policy diff reports unchanged thresholds and rejects invalid inputs', (t) 
   assert.match(invalidPolicy.stderr, /Unknown quality policy field/)
 })
 
+
+
+test('policy diff classifies both threshold directions and enforces relaxed, tightened and any gates', (t) => {
+  const before = fixture(t, JSON.stringify({
+    version: 1,
+    minCoveragePercent: 80,
+    maxUnusedRules: 2,
+    maxShadowedOccurrences: 2,
+  }))
+  const after = fixture(t, JSON.stringify({
+    version: 1,
+    minCoveragePercent: 90,
+    maxUnusedRules: 3,
+    maxPatternMismatchRules: 1,
+  }))
+  const relaxed = runCli(['policy', 'diff', before, after, '--fail-on', 'relaxed', '--format', 'json'])
+  assert.equal(relaxed.status, 1)
+  const relaxedReport = JSON.parse(relaxed.stdout)
+  assert.equal(relaxedReport.summary.tightened, 2)
+  assert.equal(relaxedReport.summary.relaxed, 2)
+  assert.deepEqual(relaxedReport.gate, {
+    failOn: 'relaxed',
+    passed: false,
+    failureCount: 2,
+    failureReasons: [{ category: 'relaxed', count: 2 }],
+  })
+  assert.equal(relaxedReport.changes.find((item) => item.field === 'maxUnusedRules').impact, 'relaxed')
+  assert.equal(relaxedReport.changes.find((item) => item.field === 'maxPatternMismatchRules').impact, 'tightened')
+
+  const tightened = runCli(['policy', 'diff', before, after, '--fail-on', 'tightened', '--format', 'json'])
+  assert.equal(tightened.status, 1)
+  assert.equal(JSON.parse(tightened.stdout).gate.failureCount, 2)
+
+  const any = runCli(['policy', 'diff', before, after, '--fail-on', 'any', '--format', 'json'])
+  assert.equal(any.status, 1)
+  assert.equal(JSON.parse(any.stdout).gate.failureCount, 4)
+
+  const invalidGate = runCli(['policy', 'diff', before, after, '--fail-on', 'unknown'])
+  assert.equal(invalidGate.status, 2)
+  assert.match(invalidGate.stderr, /--fail-on must be/)
+
+  const unchanged = runCli(['policy', 'diff', before, before, '--fail-on', 'any', '--format', 'json'])
+  assert.equal(unchanged.status, 0)
+  assert.equal(JSON.parse(unchanged.stdout).gate.passed, true)
+})
 
 test('policy init writes strict, balanced and permissive presets with the published schema reference', (t) => {
   const expected = {

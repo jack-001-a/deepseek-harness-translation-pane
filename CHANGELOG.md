@@ -29,7 +29,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Publish a JSON Schema 2020-12 definition for quality policy files and editor validation.
 - Add a standalone `policy validate` command to check quality policy files without running a glossary audit.
 - Add strict, balanced and permissive quality policy starter presets with safe non-overwriting file creation.
-- Add a quality policy diff command to review threshold and schema-reference changes.
+- Add a quality policy diff command to review threshold and schema-reference changes, classify tightened versus relaxed gates, and optionally fail CI on selected changes.
 - Extend the glossary-audit Action with Git-base policy comparison, threshold-change outputs and a pull-request Job Summary table.
 - Clarify overlap precedence: earliest source position wins, then per-position priority, match length and original entry order.
 
