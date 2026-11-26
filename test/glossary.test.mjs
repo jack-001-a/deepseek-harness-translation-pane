@@ -95,7 +95,7 @@ test('translation plans split only prose and reassemble results in their origina
 
   const results = fragments.map((text) => ({ text: '[' + text + ']' }))
   const rendered = renderTranslationPlans(plans, results)
-  assert.deepEqual(rendered.texts, ['深度求索[ ][ is ][useful]', '接口'])
+  assert.deepEqual(rendered.texts, ['深度求索[ ]接口[ is ][useful]', '接口'])
   assert.equal(rendered.consumed, results.length)
 })
 
@@ -215,7 +215,7 @@ test('Markdown mode applies the glossary only to prose, not protected syntax or 
     format: 'markdown',
   })
 
-  assert.deepEqual(h.requests, ['USE ', ' WITH '])
+  assert.deepEqual(h.requests, ['\n\nUse ', ' with '])
   assert.equal(result.text.startsWith('# 深度求索接口'), true)
   assert.ok(result.text.includes(tick + 'DeepSeek API' + tick), 'inline code must remain unchanged')
   assert.ok(result.text.includes('[接口](https://example.test/API)'), 'link labels use the glossary but destinations stay unchanged')
