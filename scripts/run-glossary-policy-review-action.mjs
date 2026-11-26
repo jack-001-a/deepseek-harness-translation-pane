@@ -63,13 +63,14 @@ if (resolvedBase.error || resolvedBase.status !== 0) {
 }
 const baseCommit = resolvedBase.stdout.trim()
 const baselineCheck = spawnSync('git', [
-  'cat-file', '-e', baseCommit + ':' + gitPolicyPath.split(sep).join('/'),
+  '--literal-pathspecs', 'ls-tree', '-z', '--full-tree', baseCommit, '--',
+  gitPolicyPath.split(sep).join('/'),
 ], { cwd: process.cwd(), encoding: 'utf8' })
-if (baselineCheck.error || ![0, 1].includes(baselineCheck.status)) {
+if (baselineCheck.error || baselineCheck.status !== 0) {
   throw new Error('Unable to inspect policy-file in policy-base-ref: ' +
     String(baselineCheck.stderr || baselineCheck.error?.message || '').trim())
 }
-const beforePresent = baselineCheck.status === 0
+const beforePresent = baselineCheck.stdout.length > 0
 const afterPresent = existsSync(absolutePolicyFile)
 if (!beforePresent && !afterPresent) {
   throw new Error('The policy-file is absent from both policy-base-ref and the current checkout.')
