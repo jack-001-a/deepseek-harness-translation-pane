@@ -494,6 +494,56 @@ test('policy validate checks a standalone quality policy without glossary or sam
   })
 })
 
+
+test('policy init writes strict, balanced and permissive presets with the published schema reference', (t) => {
+  const expected = {
+    strict: { minCoveragePercent: 95, maxUnusedRules: 0, maxShadowedOccurrences: 0, maxPatternMismatchRules: 0, maxOutOfScopeRules: 0 },
+    balanced: { minCoveragePercent: 80, maxUnusedRules: 2, maxShadowedOccurrences: 2, maxPatternMismatchRules: 0, maxOutOfScopeRules: 2 },
+    permissive: { minCoveragePercent: 60, maxUnusedRules: 10, maxShadowedOccurrences: 5, maxPatternMismatchRules: 2, maxOutOfScopeRules: 5 },
+  }
+  for (const [preset, thresholds] of Object.entries(expected)) {
+    const output = join(tmpdir(), 'translation-pane-policy-' + preset + '-' + process.pid + '-' + Date.now() + '.json')
+    t.after(() => rmSync(output, { force: true }))
+    const result = runCli(['policy', 'init', '--preset', preset, '--output', output, '--format', 'json'])
+    assert.equal(result.status, 0, result.stderr)
+    const report = JSON.parse(result.stdout)
+    assert.equal(report.preset, preset)
+    assert.equal(report.written, true)
+    const document = JSON.parse(readFileSync(output, 'utf8'))
+    assert.equal(document.version, 1)
+    assert.equal(document.$schema, 'https://raw.githubusercontent.com/jack-001-a/deepseek-harness-translation-pane/main/config/glossary-policy.schema.json')
+    const actual = { ...document }
+    delete actual.$schema
+    delete actual.version
+    assert.deepEqual(actual, thresholds)
+  }
+})
+
+test('policy init defaults to balanced and never overwrites an existing file', (t) => {
+  const output = join(tmpdir(), 'translation-pane-policy-default-' + process.pid + '-' + Date.now() + '.json')
+  t.after(() => rmSync(output, { force: true }))
+  const initial = runCli(['policy', 'init', '--output', output])
+  assert.equal(initial.status, 0, initial.stderr)
+  const document = JSON.parse(readFileSync(output, 'utf8'))
+  assert.equal(document.minCoveragePercent, 80)
+  assert.equal(document.maxUnusedRules, 2)
+
+  const overwrite = runCli(['policy', 'init', '--preset', 'strict', '--output', output])
+  assert.equal(overwrite.status, 2)
+  assert.match(overwrite.stderr, /EEXIST/)
+  assert.equal(JSON.parse(readFileSync(output, 'utf8')).minCoveragePercent, 80)
+})
+
+test('policy init rejects unknown presets and missing output paths', () => {
+  const unknown = runCli(['policy', 'init', '--preset', 'custom', '--output', 'policy.json'])
+  const missing = runCli(['policy', 'init', '--preset', 'strict'])
+  assert.equal(unknown.status, 2)
+  assert.match(unknown.stderr, /--preset must be one of/)
+  assert.equal(missing.status, 2)
+  assert.match(missing.stderr, /requires --output/)
+})
+
+
 test('policy validate rejects invalid policy files and unknown subcommands', (t) => {
   const invalid = fixture(t, '{"version":1,"minCoveragePercent":101}')
   const malformed = fixture(t, '{broken')

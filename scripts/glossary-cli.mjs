@@ -579,6 +579,8 @@ function explain(args) {
 
  
 
+const POLICY_SCHEMA_URI = 'https://raw.githubusercontent.com/jack-001-a/deepseek-harness-translation-pane/main/config/glossary-policy.schema.json'
+
 const QUALITY_POLICY_FIELDS = new Set([
   'minCoveragePercent',
   'maxUnusedRules',
@@ -957,6 +959,74 @@ function fixGlossary(args) {
 }
 
 
+
+function initializeQualityPolicyCommand(args) {
+  const { positional, options } = parseOptions(args, new Set(['output', 'preset', 'format']))
+  if (positional.length !== 0) throw new CliError('policy init does not accept positional arguments.')
+  if (typeof options.output !== 'string' || options.output.length === 0 || options.output === '-') {
+    throw new CliError('policy init requires --output <new-file>.')
+  }
+  const format = options.format ?? 'text'
+  if (!['text', 'json'].includes(format)) throw new CliError('--format must be "text" or "json".')
+
+  const presetName = options.preset ?? 'balanced'
+  const presets = {
+    strict: {
+      minCoveragePercent: 95,
+      maxUnusedRules: 0,
+      maxShadowedOccurrences: 0,
+      maxPatternMismatchRules: 0,
+      maxOutOfScopeRules: 0,
+    },
+    balanced: {
+      minCoveragePercent: 80,
+      maxUnusedRules: 2,
+      maxShadowedOccurrences: 2,
+      maxPatternMismatchRules: 0,
+      maxOutOfScopeRules: 2,
+    },
+    permissive: {
+      minCoveragePercent: 60,
+      maxUnusedRules: 10,
+      maxShadowedOccurrences: 5,
+      maxPatternMismatchRules: 2,
+      maxOutOfScopeRules: 5,
+    },
+  }
+  if (!Object.hasOwn(presets, presetName)) {
+    throw new CliError('--preset must be one of: strict, balanced, permissive.')
+  }
+
+  const outputPath = resolve(options.output)
+  const document = {
+    $schema: POLICY_SCHEMA_URI,
+    version: 1,
+    ...presets[presetName],
+  }
+  mkdirSync(dirname(outputPath), { recursive: true })
+  writeFileSync(outputPath, JSON.stringify(document, null, 2) + '\n', {
+    encoding: 'utf8',
+    flag: 'wx',
+  })
+
+  const report = {
+    command: 'policy init',
+    preset: presetName,
+    outputFile: options.output,
+    schema: POLICY_SCHEMA_URI,
+    thresholds: presets[presetName],
+    written: true,
+  }
+  if (format === 'json') {
+    writeJson(report)
+  } else {
+    process.stdout.write('Created ' + presetName + ' quality policy at ' + options.output + '\n')
+    process.stdout.write('Edit thresholds for your project before enforcing them in CI.\n')
+    process.stdout.write('Validate it with: dsh-translation-glossary policy validate ' + options.output + '\n')
+  }
+  return 0
+}
+
 function validateQualityPolicyCommand(args) {
   const { positional, options } = parseOptions(args, new Set(['format']))
   if (positional.length !== 1 || positional[0] === '-') {
@@ -1005,8 +1075,9 @@ function main(argv) {
   try {
     if (command === 'fix') return fixGlossary(args)
     if (command === 'policy') {
-      if (args[0] !== 'validate') throw new CliError('policy supports only the validate subcommand.')
-      return validateQualityPolicyCommand(args.slice(1))
+      if (args[0] === 'validate') return validateQualityPolicyCommand(args.slice(1))
+      if (args[0] === 'init') return initializeQualityPolicyCommand(args.slice(1))
+      throw new CliError('policy supports the validate and init subcommands.')
     }
     if (command === 'validate') return validate(args)
     if (command === 'preview') return preview(args)
