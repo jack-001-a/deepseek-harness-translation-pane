@@ -226,6 +226,8 @@ test('config: the defaults are the documented ones', () => {
   assert.equal(config.cacheMaxBytes, 8 * 1024 * 1024)
   assert.equal(config.rateLimitPerMinute, 60)
   assert.equal(config.maxConcurrency, 3)
+  assert.deepEqual(config.glossary, [])
+  assert.deepEqual(config.glossaryWarnings, [])
   assert.equal(config.maxQueuedRequests, 24)
 })
 
@@ -346,6 +348,7 @@ test('describe: it reports the routing facts the browser needs', () => {
     'cacheHits',
     'cacheMisses',
     'glossaryEntries',
+    'glossaryWarnings',
     'failover',
     'fragmentChars',
     'languages',
@@ -1648,7 +1651,7 @@ test('Remote marker: the descriptor names both methods', () => {
   assert.ok(Object.isFrozen(marker.methods))
   assert.deepEqual(
     marker.methods.map((method) => method.method),
-    ['describe', 'translate'],
+    ['describe', 'translate', 'setGlossary'],
   )
   for (const method of marker.methods) {
     assert.equal(method.invocation.kind, 'direct')
@@ -2273,6 +2276,7 @@ test('concurrency: a failed fragment prevents queued fragments from being dispat
   assert.equal(calls.length, 2, 'only the already-active fragments may reach the provider')
   assert.deepEqual(calls, ['a'.repeat(50), 'b'.repeat(50)])
 })
+
 
 test('logging: the source text never reaches the log', async (t) => {
   mockFetch(async () => jsonResponse(bingPayload('ok')), t)
