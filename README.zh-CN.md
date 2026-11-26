@@ -9,7 +9,7 @@
 | 位置 | 功能 |
 |---|---|
 | 侧边栏 | 一个 Translation 入口，在主区域打开翻译页面 |
-| 翻译工作台 | 源语言/目标语言选择、服务选择、格式选择、原文与译文卡片、语言交换、复制、清空、字符计数和 `Ctrl+Enter` 快捷键 |
+| 翻译工作台 | 源语言/目标语言选择、服务选择、普通文本/JSON/Markdown 格式、原文与译文卡片、语言交换、复制、清空、字符计数和 `Ctrl+Enter` 快捷键 |
 | Provider 故障切换 | 直连模式下，Bing 或 Google 发生可切换的服务级故障时，尝试另一个 Provider，并明确显示实际提供译文的服务 |
 | Agent 工具 | `translate_text(text, targetLanguage, sourceLanguage?, format?)` |
 
@@ -56,6 +56,12 @@ Agent 工具也支持：
 ```
 
 默认格式仍然是普通文本。无效 JSON 会在联系 Provider 之前被拒绝。
+
+### Markdown 模式
+
+在 Format 中选择 **Markdown（保留文档结构）**。插件只会把普通段落、标题文本和链接标签等自然语言内容发送给翻译服务；代码围栏及代码内容、行内代码、链接目标、裸 URL、模板占位符、HTML 标签、实体和常见 Markdown 结构标记会原样保留，并在翻译后按原顺序重组。
+
+这是一套保守的 Markdown 词法保护，不是完整的 CommonMark 解析器。项目自定义扩展或复杂嵌套链接可能需要额外适配。Agent 工具使用 `format: "markdown"` 开启同样的行为。默认仍为普通文本。
 
 ## 翻译通道
 
