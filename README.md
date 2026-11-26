@@ -21,7 +21,9 @@ Choose **JSON values only** in the Format selector to translate JSON safely. The
 
 Choose **Markdown (preserve structure)** to translate prose while keeping fenced and inline code, Markdown link destinations and syntax, bare URLs, template placeholders, HTML tags, entities and common block prefixes out of provider requests. Link labels and ordinary prose are translated; protected source spans are reassembled unchanged and in their original order. This is a conservative Markdown lexer, not a full CommonMark parser, so project-specific extensions or unusual nested link syntax may need additional coverage. The agent tool accepts the same opt-in `format: "markdown"` argument. The default remains plain text.
 
-Configure a **Glossary** in the profile patch to keep product names, technical vocabulary and preferred wording consistent. Each `{ source, target }` pair is matched case-insensitively; longer terms take priority, and ASCII word boundaries prevent accidental partial matches. Matching source terms are replaced locally and are not sent to the translation provider. This applies to plain text, JSON string values and Markdown prose, but never to Markdown code or other protected spans.
+Configure a **Glossary** in the profile patch to keep product names, technical vocabulary and preferred wording consistent. The original `{ source, target }` array remains supported. Advanced entries can scope a term to `sourceLanguage` / `targetLanguage`, choose case-sensitive or whole-word/substring matching, set `priority`, or disable an entry. Higher priority wins; ties use longest-match order. Duplicate conflicting source terms in one language pair are rejected, while overlapping terms are reported as warnings.
+
+The page includes a glossary JSON editor with file import, live apply and JSON export. Import accepts the versioned `{ "version": 1, "glossary": [...] }` format or the legacy bare array. Applying changes invalidates the translation cache and affects the current Host session; add the exported terms to the profile patch to keep them after a Host restart. A source-language scope only matches that language (including regional subtags); when the request source is `auto`, only wildcard or `auto` rules apply, so the plugin never guesses a language-specific glossary.
 
 ## How translation runs
 
@@ -256,10 +258,18 @@ or invalid.
     rateLimitPerMinute: 60
     maxConcurrency: 3
     glossary:
+      # Legacy, language-agnostic form remains supported.
       - source: DeepSeek API
         target: 深度求索接口
+      # Advanced form: language pair, matching rules and priority.
       - source: API
         target: 接口
+        sourceLanguage: en
+        targetLanguage: zh-Hans
+        matchCase: false
+        wholeWord: true
+        priority: 10
+        enabled: true
 ```
 
 | Key | Default | Meaning |
@@ -279,7 +289,39 @@ or invalid.
 | `cacheSize` | `64` | Bounded LRU of finished translations; `0` disables it |
 | `rateLimitPerMinute` | `60` | Token bucket across all callers |
 | `maxConcurrency` | `3` | Fragments of one long request in flight at once |
-| `glossary` | `[]` | Up to 128 `{ source, target }` terms (each at most 128 characters); matched source terms are locally replaced and never sent to a provider |
+| `glossary` | `[]` | Up to 128 terms; each source/target is at most 128 characters. Supports language scopes, case/whole-word rules, priorities and enabled flags. Matched source terms stay local |
+
+
+Glossary entry fields:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `source`, `target` | required | Source term and preferred target wording |
+| `sourceLanguage`, `targetLanguage` | `*` | `*` matches every language; a BCP-47 tag also matches regional subtags |
+| `matchCase` | `false` | Match exact letter case when `true` |
+| `wholeWord` | inferred | Omit to infer ASCII boundaries; `true` requires whole-word boundaries, `false` allows substring matches |
+| `priority` | `0` | Integer from `-1000` to `1000`; higher values win before longest-match ordering |
+| `enabled` | `true` | Set to `false` to retain an entry without applying it |
+
+The portable JSON format is:
+
+```json
+{
+  "version": 1,
+  "glossary": [
+    {
+      "source": "API",
+      "target": "接口",
+      "sourceLanguage": "en",
+      "targetLanguage": "zh-Hans",
+      "wholeWord": true,
+      "priority": 10
+    }
+  ]
+}
+```
+
+The editor's **Import JSON file** reads this format (and the legacy array); **Apply glossary** validates and activates it for the current Host session; **Copy / export JSON** copies the active terms in the portable format. Overlap warnings are non-fatal and deterministic. Conflicting duplicate source terms in the same language scope block import until resolved.
 
 ## Install
 
