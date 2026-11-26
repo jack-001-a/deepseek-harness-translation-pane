@@ -17,7 +17,9 @@ on npm and on [GitHub](https://github.com/jack-001-a/deepseek-harness-translatio
 
 The language, provider and format choices are remembered in the page's local storage.
 
-Choose **JSON values only** in the Format selector to translate JSON safely. The parser validates the document, leaves object keys and all non-string values untouched, and translates only string values. It preserves the original JSON whitespace and layout rather than reserializing the document. The agent tool accepts the same opt-in `format: "json"` argument; the default remains plain text.
+Choose **JSON values only** in the Format selector to translate JSON safely. The parser validates the document, leaves object keys and all non-string values untouched, and translates only string values. It preserves the original JSON whitespace and layout rather than reserializing the document.
+
+Choose **Markdown (preserve structure)** to translate prose while keeping fenced and inline code, Markdown link destinations and syntax, bare URLs, template placeholders, HTML tags, entities and common block prefixes out of provider requests. Link labels and ordinary prose are translated; protected source spans are reassembled unchanged and in their original order. This is a conservative Markdown lexer, not a full CommonMark parser, so project-specific extensions or unusual nested link syntax may need additional coverage. The agent tool accepts the same opt-in `format: "markdown"` argument. The default remains plain text.
 
 ## How translation runs
 
