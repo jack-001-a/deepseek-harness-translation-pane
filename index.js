@@ -514,12 +514,14 @@ function parseRetryAfter(value) {
     const seconds = Number(trimmed)
     if (!Number.isFinite(seconds)) return Number.MAX_VALUE
     const milliseconds = seconds * 1000
-    return Number.isFinite(milliseconds) ? milliseconds : Number.MAX_VALUE
+    return Number.isFinite(milliseconds)
+      ? Math.min(milliseconds, MAX_TIMER_DELAY_MS)
+      : MAX_TIMER_DELAY_MS
   }
 
   const when = parseHttpDate(trimmed)
   if (when === undefined) return undefined
-  return Math.max(0, when - Date.now())
+  return Math.min(Math.max(0, when - Date.now()), MAX_TIMER_DELAY_MS)
 }
 /**
  * A bounded least-recently-used map of translated documents.
