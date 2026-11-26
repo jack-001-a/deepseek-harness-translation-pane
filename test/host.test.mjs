@@ -291,20 +291,20 @@ test('describe: it reports the routing facts the browser needs', () => {
   const h = harness()
   const described = h.service.describe()
   assert.deepEqual(Object.keys(described).sort(), [
+    'activeRequests',
     'cacheEntries',
     'cacheHits',
     'cacheMisses',
     'failover',
     'fragmentChars',
     'languages',
-    'maxRetries',
-    'maxTextChars',
     'maxConcurrency',
     'maxQueuedRequests',
-    'activeRequests',
-    'queuedRequests',
+    'maxRetries',
+    'maxTextChars',
     'providerHealth',
     'providers',
+    'queuedRequests',
     'rateLimitPerMinute',
     'route',
   ])
@@ -1309,6 +1309,28 @@ test('concurrency: distinct translation demands share one service-wide limit', a
     ),
   )
   assert.equal(peak, 2, 'unique requests must share the same provider concurrency budget')
+})
+
+test('concurrency: distinct shipped-translator demands share the same service-wide limit', async () => {
+  let running = 0
+  let peak = 0
+  const translator = fakeTranslator({
+    translate: async (spec) => {
+      running += 1
+      peak = Math.max(peak, running)
+      await new Promise((resolve) => setTimeout(resolve, 8))
+      running -= 1
+      return `translated ${spec.text}`
+    },
+  })
+  const h = harness({ translator, config: { maxConcurrency: 1 } })
+
+  await Promise.all(
+    ['one', 'two', 'three'].map((text) =>
+      h.service.translateRequest({ text, targetLanguage: 'en' }),
+    ),
+  )
+  assert.equal(peak, 1, 'the shipped translator route must share the same global slots')
 })
 
 test('scheduler: FIFO waiters are cancellable and do not consume slots after leaving', async (t) => {
