@@ -257,6 +257,33 @@ test('config: sensible overrides are accepted and unusable values fall back', ()
   assert.equal(config.maxConcurrency, 7)
   assert.equal(config.maxResponseBytes, 2048)
 
+  const fractional = resolveConfig({
+    timeoutMs: 0.5,
+    attemptTimeoutMs: 0.5,
+    providerCooldownMs: 0.5,
+    maxTextChars: 0.5,
+    fragmentChars: 0.5,
+    maxRetries: 0.5,
+    retryBaseMs: 0.5,
+    retryMaxMs: 0.5,
+    maxResponseBytes: 0.5,
+    cacheSize: 0.5,
+    rateLimitPerMinute: 0.5,
+    maxConcurrency: 0.5,
+  })
+  assert.equal(fractional.timeoutMs, 20000)
+  assert.equal(fractional.attemptTimeoutMs, 3000)
+  assert.equal(fractional.providerCooldownMs, 300000)
+  assert.equal(fractional.maxTextChars, 20000)
+  assert.equal(fractional.fragmentChars, 3000)
+  assert.equal(fractional.maxRetries, 2)
+  assert.equal(fractional.retryBaseMs, 250)
+  assert.equal(fractional.retryMaxMs, 4000)
+  assert.equal(fractional.maxResponseBytes, 1024 * 1024)
+  assert.equal(fractional.cacheSize, 64)
+  assert.equal(fractional.rateLimitPerMinute, 60)
+  assert.equal(fractional.maxConcurrency, 3)
+
   const broken = resolveConfig({
     bingEndpoint: 'not a url',
     timeoutMs: -1,
@@ -280,6 +307,15 @@ test('config: sensible overrides are accepted and unusable values fall back', ()
   assert.equal(resolveConfig({ timeoutMs: 800, attemptTimeoutMs: 5000 }).attemptTimeoutMs, 800)
   // A zero cooldown turns the observation window off without touching failover.
   assert.equal(resolveConfig({ providerCooldownMs: 0 }).providerCooldownMs, 0)
+})
+
+test('config: provider endpoints reject credentials and URL fragments', () => {
+  const config = resolveConfig({
+    bingEndpoint: 'https://user:password@example.test/translate',
+    googleEndpoint: 'https://example.test/google#fragment',
+  })
+  assert.equal(config.bingEndpoint, 'https://edge.microsoft.com/translate/translatetext')
+  assert.equal(config.googleEndpoint, 'https://translate.googleapis.com/translate_a/single')
 })
 
 test('describe: it reports the routing facts the browser needs', () => {
@@ -681,7 +717,7 @@ test('retry: a 429 is retried and the Retry-After header is honoured', async (t)
     return jsonResponse(bingPayload('ok'))
   }, t)
 
-  const h = harness({ config: { failover: false, maxRetries: 2, retryMaxMs: 5000 } })
+  const h = harness({ config: { failover: false, maxRetries: 2, retryMaxMs: 500 } })
   const delays = []
   h.service.sleep = async (ms) => {
     delays.push(ms)
@@ -690,7 +726,11 @@ test('retry: a 429 is retried and the Retry-After header is honoured', async (t)
   const result = await h.service.translate({ text: 'hi', targetLanguage: 'en' })
   assert.equal(result.text, 'ok')
   assert.equal(attempts, 2)
-  assert.deepEqual(delays, [1000], 'the Retry-After hint wins over the back-off')
+  assert.deepEqual(
+    delays,
+    [1000],
+    'the Retry-After hint takes precedence even when it exceeds retryMaxMs',
+  )
 })
 
 test('retry: the budget is bounded', async (t) => {

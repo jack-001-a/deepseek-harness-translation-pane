@@ -402,11 +402,17 @@ export function splitText(text, maxChars) {
  */
 function parseRetryAfter(value) {
   if (typeof value !== 'string' || value.trim().length === 0) return undefined
-  const seconds = Number(value.trim())
-  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000)
-  const when = Date.parse(value.trim())
+  const trimmed = value.trim()
+  // Keep delays inside the maximum timer range supported by Node and browsers.
+  // The request-wide deadline remains the effective upper bound for a demand.
+  const maxTimerDelayMs = 2_147_483_647
+  if (/^\d+$/u.test(trimmed)) {
+    const delayMs = Number(trimmed) * 1000
+    return Number.isFinite(delayMs) ? Math.min(delayMs, maxTimerDelayMs) : maxTimerDelayMs
+  }
+  const when = Date.parse(trimmed)
   if (Number.isNaN(when)) return undefined
-  return Math.max(0, when - Date.now())
+  return Math.min(Math.max(0, when - Date.now()), maxTimerDelayMs)
 }
 
 /**
@@ -583,8 +589,8 @@ class TokenBucket {
  * @returns a positive integer.
  */
 function positive(value, fallback) {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return fallback
-  return Math.floor(value)
+  if (!Number.isInteger(value) || value <= 0) return fallback
+  return value
 }
 
 /**
@@ -594,12 +600,12 @@ function positive(value, fallback) {
  * @returns a non-negative integer.
  */
 function nonNegative(value, fallback) {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return fallback
-  return Math.floor(value)
+  if (!Number.isInteger(value) || value < 0) return fallback
+  return value
 }
 
 /**
- * Read an HTTP(S) endpoint from the config.
+ * Read an HTTP(S) endpoint from the config, without URL credentials or fragments.
  * @param value - the raw config value.
  * @param fallback - the default used when the value is unusable.
  * @returns a normalized endpoint URL.
@@ -608,7 +614,13 @@ function endpoint(value, fallback) {
   if (typeof value !== 'string' || value.trim().length === 0) return fallback
   try {
     const url = new URL(value.trim())
-    if (!['http:', 'https:'].includes(url.protocol)) return fallback
+    if (
+      !['http:', 'https:'].includes(url.protocol) ||
+      url.username.length > 0 ||
+      url.password.length > 0 ||
+      url.hash.length > 0 ||
+      url.href.includes('#')
+    ) return fallback
     return url.href
   } catch {
     return fallback
@@ -1652,7 +1664,9 @@ export class TranslationPaneService {
   backoff(attempt, error) {
     const hinted = error?.details?.retryAfterMs
     if (typeof hinted === 'number' && Number.isFinite(hinted) && hinted >= 0) {
-      return Math.min(hinted, this.config.retryMaxMs)
+      // Retry-After is a server instruction, not the local exponential
+      // back-off. The request deadline will abort a wait that cannot fit.
+      return hinted
     }
     const base = Math.min(this.config.retryBaseMs * 2 ** attempt, this.config.retryMaxMs)
     // Jitter keeps a burst of clients from retrying in lockstep, which the
