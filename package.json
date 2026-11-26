@@ -45,7 +45,8 @@
     "icon.svg",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "SECURITY.md"
   ],
   "publishConfig": {
     "access": "public"
