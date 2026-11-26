@@ -12,6 +12,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   The Host translates prose while preserving code blocks, inline code, link
   destinations, URLs, placeholders, HTML tags, entities and common Markdown
   syntax, then reassembles the original document structure.
+- Add an optional, bounded terminology glossary. Matching source terms are
+  replaced locally with preferred target wording, with longest-term matching
+  and case-insensitive lookup, so glossary source terms are not sent to providers.
 
 
 ### Fixed
