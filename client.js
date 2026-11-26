@@ -881,6 +881,14 @@ window.__ModuleLoader__.load({
             glossary: nextGlossary,
             glossaryWarnings: warnings,
           }))
+          // The visible answer used the previous glossary; do not leave it
+          // looking like a result produced with the newly active terms.
+          setOutput('')
+          setResult(null)
+          setCopied(false)
+          setError(null)
+          setErrorTitle(null)
+          setStatus('idle')
           setGlossaryMessage(
             warnings.length > 0
               ? t('glossary.warningCount', { count: warnings.length })
