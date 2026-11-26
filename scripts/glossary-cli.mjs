@@ -13,6 +13,7 @@ const USAGE = [
   '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json]',
   '  dsh-translation-glossary audit <file|-> (--text <text> | --text-file <path>)',
   '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json]',
+  '      [--fail-on none|unused|shadowed|pattern-mismatch|out-of-scope|any]',
   '',
   'Use "-" or omit the glossary file to read glossary JSON from stdin.',
   'Exit codes: 0 success/policy pass, 1 invalid glossary or failed audit policy, 2 usage or file error.',
@@ -97,7 +98,7 @@ function validate(args) {
 function preview(args) {
   const { positional, options } = parseOptions(
     args,
-    new Set(['format', 'text', 'text-file', 'source-language', 'target-language', 'fail-on']),
+    new Set(['format', 'text', 'text-file', 'source-language', 'target-language']),
   )
   if (positional.length > 1) throw new CliError('preview accepts at most one glossary file.')
   if (Object.hasOwn(options, 'text') === Object.hasOwn(options, 'text-file')) {
@@ -105,12 +106,6 @@ function preview(args) {
   }
   const format = options.format ?? 'text'
   if (!['text', 'json'].includes(format)) throw new CliError('--format must be "text" or "json".')
-  const failOn = options['fail-on'] ?? 'none'
-  const allowedFailOn = new Set(['none', 'unused', 'shadowed', 'pattern-mismatch', 'out-of-scope', 'any'])
-  if (!allowedFailOn.has(failOn)) {
-    throw new CliError('--fail-on must be one of: none, unused, shadowed, pattern-mismatch, out-of-scope, any.')
-  }
-
   const sourceLanguage = options['source-language'] ?? 'auto'
   const targetLanguage = options['target-language'] ?? 'zh-Hans'
   const languagePattern = /^(?:auto|[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)$/u
@@ -581,7 +576,7 @@ function explain(args) {
 function audit(args) {
   const { positional, options } = parseOptions(
     args,
-    new Set(['format', 'text', 'text-file', 'source-language', 'target-language']),
+    new Set(['format', 'text', 'text-file', 'source-language', 'target-language', 'fail-on']),
   )
   if (positional.length !== 1) throw new CliError('audit requires exactly one glossary file (use "-" for stdin).')
   if (Object.hasOwn(options, 'text') === Object.hasOwn(options, 'text-file')) {
@@ -589,6 +584,12 @@ function audit(args) {
   }
   const format = options.format ?? 'text'
   if (!['text', 'json'].includes(format)) throw new CliError('--format must be "text" or "json".')
+
+  const failOn = options['fail-on'] ?? 'none'
+  const allowedFailOn = new Set(['none', 'unused', 'shadowed', 'pattern-mismatch', 'out-of-scope', 'any'])
+  if (!allowedFailOn.has(failOn)) {
+    throw new CliError('--fail-on must be one of: none, unused, shadowed, pattern-mismatch, out-of-scope, any.')
+  }
 
   const sourceLanguage = options['source-language'] ?? 'auto'
   const targetLanguage = options['target-language'] ?? 'zh-Hans'
@@ -739,7 +740,7 @@ function audit(args) {
       '/' + sourceCodeUnits + ' source code units)\n',
     )
     process.stdout.write(
-      'CI gate: --fail-on ' + failOn + ' => ' + (ciPolicy.passed ? 'PASS' : 'FAIL') + '\\n',
+      'CI gate: --fail-on ' + failOn + ' => ' + (ciPolicy.passed ? 'PASS' : 'FAIL') + '\n',
     )
     process.stdout.write(
       'Rules: ' + summary.totalRules +
