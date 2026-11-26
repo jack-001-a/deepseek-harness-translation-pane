@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest an improvement to Translation Pane.
+title: "[Feature]: "
+labels: []
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem should this solve?
+      description: Describe the user workflow or limitation, not only the feature idea.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Explain how you expect the feature to work.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Describe current workarounds or other approaches.
+    validations:
+      required: false
+  - type: dropdown
+    id: audience
+    attributes:
+      label: Who benefits most?
+      options:
+        - Daily translation users
+        - Developers translating technical documentation
+        - Agent / tool workflows
+        - Plugin maintainers and integrators
+        - Other
+    validations:
+      required: true
