@@ -59,6 +59,10 @@ const DEFAULT_RETRY_MAX_MS = 4000
 const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
 /** Translated documents kept for reuse. */
 const DEFAULT_CACHE_SIZE = 64
+/** Approximate UTF-8 byte budget for retained cache keys and translated text. */
+const DEFAULT_CACHE_MAX_BYTES = 8 * 1024 * 1024
+/** Per-entry allowance for object and Map bookkeeping not represented by string bytes. */
+const CACHE_ENTRY_OVERHEAD_BYTES = 256
 /** Anonymous provider requests allowed per minute. */
 const DEFAULT_RATE_LIMIT_PER_MINUTE = 60
 /** Fragments dispatched at the same time. */
@@ -415,9 +419,12 @@ function parseRetryAfter(value) {
 class TranslationCache {
   /**
    * @param limit - how many entries are retained.
+   * @param maxBytes - the approximate UTF-8 byte budget for retained values.
    */
-  constructor(limit) {
+  constructor(limit, maxBytes) {
     this.limit = limit
+    this.maxBytes = maxBytes
+    this.bytes = 0
     this.entries = new Map()
   }
 
@@ -427,26 +434,41 @@ class TranslationCache {
    * @returns the cached value, or `undefined` on a miss.
    */
   get(key) {
-    if (!this.entries.has(key)) return undefined
-    const value = this.entries.get(key)
+    const entry = this.entries.get(key)
+    if (entry === undefined) return undefined
     this.entries.delete(key)
-    this.entries.set(key, value)
-    return value
+    this.entries.set(key, entry)
+    return entry.value
   }
 
   /**
-   * Store one entry, evicting the least recently used one when full.
+   * Store one entry, evicting least-recently-used entries until both limits fit.
+   * Oversized individual translations are returned to the caller but not cached.
    * @param key - cache key.
-   * @param value - cached value.
+   * @param value - the translation.
    */
   set(key, value) {
-    if (this.limit <= 0) return
-    if (this.entries.has(key)) this.entries.delete(key)
-    this.entries.set(key, value)
-    while (this.entries.size > this.limit) {
-      const oldest = this.entries.keys().next()
+    if (this.limit <= 0 || this.maxBytes <= 0) return
+    const entryBytes =
+      Buffer.byteLength(key, 'utf8') +
+      Buffer.byteLength(typeof value?.text === 'string' ? value.text : '', 'utf8') +
+      CACHE_ENTRY_OVERHEAD_BYTES
+
+    const previous = this.entries.get(key)
+    if (previous !== undefined) {
+      this.entries.delete(key)
+      this.bytes -= previous.bytes
+    }
+    if (entryBytes > this.maxBytes) return
+
+    this.entries.set(key, { value, bytes: entryBytes })
+    this.bytes += entryBytes
+    while (this.entries.size > this.limit || this.bytes > this.maxBytes) {
+      const oldest = this.entries.entries().next()
       if (oldest.done) break
-      this.entries.delete(oldest.value)
+      const [oldestKey, oldestEntry] = oldest.value
+      this.entries.delete(oldestKey)
+      this.bytes -= oldestEntry.bytes
     }
   }
 
@@ -649,6 +671,7 @@ export function resolveConfig(config) {
     retryMaxMs: positive(raw.retryMaxMs, DEFAULT_RETRY_MAX_MS),
     maxResponseBytes: positive(raw.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES),
     cacheSize: nonNegative(raw.cacheSize, DEFAULT_CACHE_SIZE),
+    cacheMaxBytes: nonNegative(raw.cacheMaxBytes, DEFAULT_CACHE_MAX_BYTES),
     rateLimitPerMinute: positive(raw.rateLimitPerMinute, DEFAULT_RATE_LIMIT_PER_MINUTE),
     maxConcurrency: positive(raw.maxConcurrency, DEFAULT_MAX_CONCURRENCY),
     // The jitter source is injectable so the back-off is exactly testable.
@@ -669,7 +692,7 @@ export class TranslationPaneService {
     /** Aborted when the plugin unloads, so no request outlives the service. */
     this.lifetime = new AbortController()
     /** Translated documents kept for reuse. */
-    this.cache = new TranslationCache(config.cacheSize)
+    this.cache = new TranslationCache(config.cacheSize, config.cacheMaxBytes)
     /** Requests in flight, so identical demands share one network call. */
     this.inflight = new Map()
     /** Meter of anonymous provider requests. */
