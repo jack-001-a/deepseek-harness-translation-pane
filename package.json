@@ -54,7 +54,8 @@
     "src/host/markdown.js",
     "src/host/glossary.js",
     "scripts/glossary-sarif.mjs",
-    "scripts/run-glossary-action.mjs"
+    "scripts/run-glossary-action.mjs",
+    "config/*.json"
   ],
   "publishConfig": {
     "access": "public"

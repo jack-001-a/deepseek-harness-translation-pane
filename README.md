@@ -408,7 +408,10 @@ version 1 policy supports `minCoveragePercent`, `maxUnusedRules`,
 `maxShadowedOccurrences`, `maxPatternMismatchRules` and
 `maxOutOfScopeRules`. Every configured threshold is evaluated and included
 in the JSON / SARIF report; a failed threshold returns exit code 1. See
-`config/glossary-policy.example.json` for a starter file. The composite Action
+`config/glossary-policy.example.json` for a starter file. The sample includes a `$schema` reference to
+`config/glossary-policy.schema.json`, a JSON Schema 2020-12 document for editor
+completion and validation. The CLI accepts this metadata but evaluates only
+the supported threshold fields. The composite Action
 accepts the same file through its optional `policy-file` input.
 
 The `fix` command writes a new canonical versioned glossary file and never edits the source or overwrites an existing destination. It removes only duplicate entries that the runtime already ignores. Conflicting or invalid entries block output; overlapping terms are preserved and flagged for manual review.

@@ -598,9 +598,17 @@ function loadQualityPolicy(filePath) {
     throw new CliError('Quality policy must be an object with version: 1.')
   }
   for (const key of Object.keys(parsed)) {
-    if (key !== 'version' && !QUALITY_POLICY_FIELDS.has(key)) {
+    if (key !== 'version' && key !== '$schema' && !QUALITY_POLICY_FIELDS.has(key)) {
       throw new CliError('Unknown quality policy field: ' + key)
     }
+  }
+  if (Object.hasOwn(parsed, '$schema') && (
+    typeof parsed.$schema !== 'string' ||
+    parsed.$schema.trim().length === 0 ||
+    parsed.$schema.length > 512 ||
+    /[\u0000-\u001F\u007F]/u.test(parsed.$schema)
+  )) {
+    throw new CliError('Quality policy $schema must be a non-empty URI reference of at most 512 characters.')
   }
   const policy = {}
   for (const field of QUALITY_POLICY_FIELDS) {

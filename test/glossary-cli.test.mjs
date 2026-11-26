@@ -471,6 +471,51 @@ test('audit rejects malformed, unknown and empty quality policy definitions', (t
 })
 
 
+
+test('quality policy accepts optional schema metadata and ships a matching JSON Schema', (t) => {
+  const policy = fixture(t, JSON.stringify({
+    $schema: './glossary-policy.schema.json',
+    version: 1,
+    minCoveragePercent: 85,
+    maxUnusedRules: 2,
+  }))
+  const glossary = fixture(t, '[{"source":"API","target":"接口"}]')
+  const source = fixture(t, 'API gateway')
+  const result = runCli(['audit', glossary, '--text-file', source, '--format', 'json', '--policy', policy])
+  assert.equal(result.status, 0, result.stderr)
+  const report = JSON.parse(result.stdout)
+  assert.deepEqual(report.ciPolicy.qualityPolicy.thresholds, {
+    minCoveragePercent: 85,
+    maxUnusedRules: 2,
+  })
+
+  const schemaPath = fileURLToPath(new URL('../config/glossary-policy.schema.json', import.meta.url))
+  const schema = JSON.parse(readFileSync(schemaPath, 'utf8'))
+  assert.equal(schema.$schema, 'https://json-schema.org/draft/2020-12/schema')
+  assert.equal(schema.properties.version.const, 1)
+  assert.equal(schema.additionalProperties, false)
+  assert.deepEqual(schema.required, ['version'])
+  assert.equal(schema.anyOf.length, 5)
+  assert.equal(schema.properties.maxUnusedRules.minimum, 0)
+  assert.equal(schema.properties.maxUnusedRules.maximum, 1000000)
+})
+
+test('quality policy rejects malformed schema metadata', (t) => {
+  const glossary = fixture(t, '[{"source":"API","target":"接口"}]')
+  const source = fixture(t, 'API')
+  for (const schemaValue of ['', 42, 'x'.repeat(513), 'invalid\\u0000schema']) {
+    const policy = fixture(t, JSON.stringify({
+      $schema: schemaValue,
+      version: 1,
+      maxUnusedRules: 0,
+    }))
+    const result = runCli(['audit', glossary, '--text-file', source, '--format', 'json', '--policy', policy])
+    assert.equal(result.status, 2)
+    assert.match(result.stderr, /Quality policy \\$schema/)
+  }
+})
+
+
 test('fix removes runtime-ignored duplicates but preserves overlapping rules for review', (t) => {
   const source = fixture(t, JSON.stringify([
     { source: 'API', target: '接口' },
