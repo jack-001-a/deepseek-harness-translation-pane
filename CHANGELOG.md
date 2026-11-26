@@ -25,6 +25,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Add optional audit CI failure policies for unused, shadowed, pattern-mismatched and out-of-scope rules.
 - Emit GitHub Code Scanning-compatible SARIF 2.1.0 reports and add a reusable glossary-audit composite action.
 - Add safe glossary normalization to a separate output file and emit GitHub Actions annotations plus a Job Summary.
+- Add versioned glossary quality policies with coverage and finding thresholds for CLI and GitHub Actions.
 - Clarify overlap precedence: earliest source position wins, then per-position priority, match length and original entry order.
 
 

@@ -842,8 +842,12 @@ function audit(args) {
     )
     process.stdout.write(
       'CI gate: --fail-on ' + failOn + ' => ' + (ciPolicy.passed ? 'PASS' : 'FAIL') + '\n',
-      ...(qualityPolicy ? ['Quality policy checks: ' + qualityChecks.filter((check) => check.passed).length + '/' + qualityChecks.length + ' passed\\n'] : []),
     )
+    if (qualityPolicy) {
+      process.stdout.write(
+        'Quality policy checks: ' + qualityChecks.filter((check) => check.passed).length + '/' + qualityChecks.length + ' passed\n',
+      )
+    }
     process.stdout.write(
       'Rules: ' + summary.totalRules +
       '; active: ' + summary.activeRules +

@@ -19,6 +19,10 @@ inputs:
     description: CI policy: none, unused, shadowed, pattern-mismatch, out-of-scope, or any.
     required: false
     default: none
+  policy-file:
+    description: Optional version 1 JSON quality policy with coverage and finding thresholds.
+    required: false
+    default: ''
   sarif-file:
     description: SARIF output path relative to the workflow workspace.
     required: false
@@ -52,6 +56,7 @@ runs:
         INPUT_SOURCE_LANGUAGE: ${{ inputs.source-language }}
         INPUT_TARGET_LANGUAGE: ${{ inputs.target-language }}
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_POLICY_FILE: ${{ inputs.policy-file }}
         INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
       run: node "$ACTION_ROOT/../../../scripts/run-glossary-action.mjs"
     - name: Enforce glossary audit policy

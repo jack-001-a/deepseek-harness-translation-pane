@@ -15,11 +15,13 @@ test('composite action runner exposes SARIF and the selected policy result', (t)
   const source = join(directory, 'source.txt')
   const output = join(directory, 'github-output')
   const summary = join(directory, 'step-summary.md')
+  const policy = join(directory, 'quality-policy.json')
   const sarif = join(directory, 'reports', 'glossary.sarif')
   writeFileSync(glossary, '[{"source":"Missing","target":"缺失"}]', 'utf8')
   writeFileSync(source, 'Ordinary text', 'utf8')
   writeFileSync(output, '', 'utf8')
   writeFileSync(summary, '', 'utf8')
+  writeFileSync(policy, JSON.stringify({ version: 1, minCoveragePercent: 90, maxUnusedRules: 0 }), 'utf8')
 
   const result = spawnSync(process.execPath, [ACTION_RUNNER], {
     encoding: 'utf8',
@@ -28,6 +30,7 @@ test('composite action runner exposes SARIF and the selected policy result', (t)
       INPUT_GLOSSARY_FILE: glossary, INPUT_SOURCE_FILE: source,
       INPUT_SOURCE_LANGUAGE: 'en', INPUT_TARGET_LANGUAGE: 'zh-Hans',
       INPUT_FAIL_ON: 'any', INPUT_SARIF_FILE: sarif,
+      INPUT_POLICY_FILE: policy,
       GITHUB_STEP_SUMMARY: summary,
     },
   })
@@ -42,6 +45,9 @@ test('composite action runner exposes SARIF and the selected policy result', (t)
   const jobSummary = readFileSync(summary, 'utf8')
   assert.match(jobSummary, /## DSH glossary audit/)
   assert.match(jobSummary, /Coverage:/)
+  assert.match(jobSummary, /Quality policy: 0\/2 thresholds passed/)
   assert.match(jobSummary, /glossary-unused-term/)
-  assert.ok(readFileSync(sarif, 'utf8').includes('"version": "2.1.0"'))
+  const sarifReport = JSON.parse(readFileSync(sarif, 'utf8'))
+  assert.equal(sarifReport.version, '2.1.0')
+  assert.equal(sarifReport.runs[0].properties.ciPolicy.qualityPolicy.checks.length, 2)
 })

@@ -30,12 +30,14 @@ const sourceFile = required('INPUT_SOURCE_FILE')
 const sourceLanguage = process.env.INPUT_SOURCE_LANGUAGE || 'auto'
 const targetLanguage = process.env.INPUT_TARGET_LANGUAGE || 'zh-Hans'
 const failOn = process.env.INPUT_FAIL_ON || 'none'
+const policyFile = process.env.INPUT_POLICY_FILE || ''
 const sarifFile = process.env.INPUT_SARIF_FILE || 'glossary-audit.sarif'
 
 for (const [name, value] of [
   ['INPUT_SOURCE_LANGUAGE', sourceLanguage],
   ['INPUT_TARGET_LANGUAGE', targetLanguage],
   ['INPUT_FAIL_ON', failOn],
+  ['INPUT_POLICY_FILE', policyFile],
   ['INPUT_SARIF_FILE', sarifFile],
 ]) {
   if (value.includes('\n') || value.includes('\r')) {
@@ -47,13 +49,15 @@ const nodeMajor = Number(process.versions.node.split('.')[0])
 if (nodeMajor < 22) throw new Error('The glossary audit action requires Node.js 22 or newer.')
 
 rmSync(sarifFile, { force: true })
-const result = spawnSync(process.execPath, [
+const cliArgs = [
   cliPath, 'audit', glossaryFile, '--text-file', sourceFile,
   '--source-language', sourceLanguage,
   '--target-language', targetLanguage,
   '--fail-on', failOn,
   '--format', 'sarif', '--output', sarifFile,
-], { cwd: process.cwd(), stdio: 'inherit' })
+]
+if (policyFile) cliArgs.push('--policy', policyFile)
+const result = spawnSync(process.execPath, cliArgs, { cwd: process.cwd(), stdio: 'inherit' })
 
 const exitCode = result.error || result.status === null ? 2 : result.status
 const exists = existsSync(sarifFile)
@@ -140,6 +144,7 @@ if (summaryFile) {
     '- **Coverage:** ' + (Number.isFinite(summary.coveragePercent) ? summary.coveragePercent + '%' : 'not available'),
     '- **Rules:** ' + (summary.totalRules ?? 0) + ' total; ' + (summary.activeRules ?? 0) + ' active; ' +
       (summary.fullyShadowedRules ?? 0) + ' fully shadowed; ' + (summary.unusedRules ?? 0) + ' unused',
+    '- **Quality policy:** ' + (policy.qualityPolicy ? policy.qualityPolicy.checks.filter((check) => check.passed).length + '/' + policy.qualityPolicy.checks.length + ' thresholds passed' : 'not configured'),
     '- **Findings:** ' + findings.length + ' total; ' + (levels.error ?? 0) + ' errors; ' +
       (levels.warning ?? 0) + ' warnings; ' + (levels.note ?? 0) + ' notices',
     '',

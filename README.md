@@ -359,6 +359,11 @@ npm run glossary -- audit path/to/glossary.json \
   --source-language en --target-language zh-Hans \
   --text-file ./samples/source.txt --fail-on any --format json
 
+# Apply a reusable version 1 quality policy.
+npm run glossary -- audit path/to/glossary.json \
+  --source-language en --target-language zh-Hans \
+  --text-file ./samples/source.txt --policy ./config/glossary-policy.json --format json
+
 # Generate a SARIF 2.1.0 report for GitHub Code Scanning.
 npm run glossary -- audit path/to/glossary.json \
   --source-language en --target-language zh-Hans \
@@ -398,6 +403,14 @@ The repository also includes a reusable composite action at
 a glossary file, source sample, language pair, failure policy and SARIF path.
 Its outputs expose the report path, finding count, audit result, exit code and annotation count. It emits up to 50 GitHub workflow annotations and appends a coverage / finding summary to `GITHUB_STEP_SUMMARY` when available. Workflow-command message and path values are escaped before output.
 
+An optional `--policy` file adds threshold-based checks on top of `--fail-on`. The
+version 1 policy supports `minCoveragePercent`, `maxUnusedRules`,
+`maxShadowedOccurrences`, `maxPatternMismatchRules` and
+`maxOutOfScopeRules`. Every configured threshold is evaluated and included
+in the JSON / SARIF report; a failed threshold returns exit code 1. See
+`config/glossary-policy.example.json` for a starter file. The composite Action
+accepts the same file through its optional `policy-file` input.
+
 The `fix` command writes a new canonical versioned glossary file and never edits the source or overwrites an existing destination. It removes only duplicate entries that the runtime already ignores. Conflicting or invalid entries block output; overlapping terms are preserved and flagged for manual review.
 
 The action generates SARIF before enforcing the selected policy. Upload the
@@ -423,6 +436,7 @@ steps:
       source-language: en
       target-language: zh-Hans
       fail-on: any
+      policy-file: ./config/glossary-policy.json
       sarif-file: ./reports/glossary-audit.sarif
   - name: Upload glossary findings
     if: always() && steps.glossary-audit.outputs.sarif-file != ''
