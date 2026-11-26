@@ -10,7 +10,7 @@ const USAGE = [
   'Usage:',
   '  dsh-translation-glossary validate [file|-] [--format text|json]',
   '  dsh-translation-glossary policy validate <policy-file> [--format text|json]',
-  '  dsh-translation-glossary policy diff <before-file> <after-file> [--format text|json] [--fail-on none|relaxed|tightened|any]',
+  '  dsh-translation-glossary policy diff <before-file|-> <after-file|-> [--format text|json] [--fail-on none|relaxed|tightened|any]',
   '  dsh-translation-glossary fix <file> --output <new-file> [--format text|json]',
   '  dsh-translation-glossary preview [file|-] (--text <text> | --text-file <path>)',
   '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json|sarif] [--output <path>]',
@@ -22,6 +22,7 @@ const USAGE = [
   '      [--fail-on none|unused|shadowed|pattern-mismatch|out-of-scope|any] [--policy <file>]',
   '',
   'Use "-" or omit the glossary file to read glossary JSON from stdin.',
+  'For policy diff, "-" explicitly represents a policy file absent from that revision; it never reads stdin.',
   'Exit codes: 0 success/policy pass, 1 invalid glossary or failed audit policy, 2 usage or file error.',
 ].join('\n')
 
@@ -1031,8 +1032,8 @@ function initializeQualityPolicyCommand(args) {
 
 function diffQualityPolicies(args) {
   const { positional, options } = parseOptions(args, new Set(['format', 'fail-on']))
-  if (positional.length !== 2 || positional.includes('-')) {
-    throw new CliError('policy diff requires exactly two file paths; stdin is not supported.')
+  if (positional.length !== 2) {
+    throw new CliError('policy diff requires exactly two file paths (use "-" for a missing policy file).')
   }
   const format = options.format ?? 'text'
   if (!['text', 'json'].includes(format)) throw new CliError('--format must be "text" or "json".')
@@ -1042,6 +1043,9 @@ function diffQualityPolicies(args) {
   }
 
   function readDocument(filePath) {
+    if (filePath === '-') {
+      return { document: { version: 1, $schema: null }, thresholds: {}, present: false }
+    }
     const input = readTextFile(filePath, 'quality policy file')
     let document
     try {
@@ -1050,7 +1054,7 @@ function diffQualityPolicies(args) {
       throw new CliError('Quality policy must be valid JSON: ' + filePath)
     }
     const thresholds = loadQualityPolicy(filePath)
-    return { document, thresholds }
+    return { document, thresholds, present: true }
   }
 
   function classifyImpact(field, change, beforeValue, afterValue) {
@@ -1116,6 +1120,8 @@ function diffQualityPolicies(args) {
     afterFile: positional[1],
     versionBefore: before.document.version,
     versionAfter: after.document.version,
+    beforePresent: before.present,
+    afterPresent: after.present,
     schemaBefore,
     schemaAfter,
     schemaChanged,
@@ -1132,6 +1138,8 @@ function diffQualityPolicies(args) {
     process.stdout.write(
       'Impact: ' + summary.tightened + ' tightened; ' + summary.relaxed + ' relaxed\n',
     )
+    process.stdout.write('Policy files: before ' + (before.present ? 'present' : 'absent') +
+      '; after ' + (after.present ? 'present' : 'absent') + '\n')
     process.stdout.write('Review gate: --fail-on ' + failOn + ' => ' + (gate.passed ? 'PASS' : 'FAIL') + '\n')
     if (schemaChanged) {
       process.stdout.write('Schema reference changed: ' +

@@ -45,6 +45,9 @@ outputs:
   policy-diff-base-commit:
     description: Resolved full Git commit SHA used as the baseline.
     value: ${{ steps.review.outputs.policy-diff-base-commit }}
+  policy-file-change:
+    description: Whether the policy file was added, deleted, or present in both revisions.
+    value: ${{ steps.review.outputs.policy-file-change }}
 runs:
   using: composite
   steps:

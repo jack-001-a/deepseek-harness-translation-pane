@@ -538,11 +538,11 @@ test('policy diff reports unchanged thresholds and rejects invalid inputs', (t) 
     added: 0, removed: 0, changed: 0, unchanged: 2, tightened: 0, relaxed: 0,
   })
   const oneInput = runCli(['policy', 'diff', first])
-  const twoStdin = runCli(['policy', 'diff', '-', '-'])
+  const oneMissingSide = runCli(['policy', 'diff', first])
   const invalid = fixture(t, '{"version":1,"unknown":1}')
   const invalidPolicy = runCli(['policy', 'diff', first, invalid])
   assert.equal(oneInput.status, 2)
-  assert.equal(twoStdin.status, 2)
+  assert.equal(oneMissingSide.status, 2)
   assert.equal(invalidPolicy.status, 2)
   assert.match(invalidPolicy.stderr, /Unknown quality policy field/)
 })
@@ -591,6 +591,38 @@ test('policy diff classifies both threshold directions and enforces relaxed, tig
   const unchanged = runCli(['policy', 'diff', before, before, '--fail-on', 'any', '--format', 'json'])
   assert.equal(unchanged.status, 0)
   assert.equal(JSON.parse(unchanged.stdout).gate.passed, true)
+})
+
+
+test('policy diff treats dash as an absent policy side without reading stdin', (t) => {
+  const current = fixture(t, JSON.stringify({
+    version: 1,
+    minCoveragePercent: 90,
+    maxUnusedRules: 1,
+  }))
+  const added = runCli(['policy', 'diff', '-', current, '--format', 'json', '--fail-on', 'relaxed'])
+  assert.equal(added.status, 0, added.stderr)
+  const addedReport = JSON.parse(added.stdout)
+  assert.equal(addedReport.beforePresent, false)
+  assert.equal(addedReport.afterPresent, true)
+  assert.deepEqual(addedReport.summary, {
+    added: 2, removed: 0, changed: 0, unchanged: 0, tightened: 2, relaxed: 0,
+  })
+  assert.equal(addedReport.changes.every((item) => item.change === 'added' && item.impact === 'tightened'), true)
+
+  const deleted = runCli(['policy', 'diff', current, '-', '--format', 'json', '--fail-on', 'relaxed'])
+  assert.equal(deleted.status, 1)
+  const deletedReport = JSON.parse(deleted.stdout)
+  assert.equal(deletedReport.beforePresent, true)
+  assert.equal(deletedReport.afterPresent, false)
+  assert.deepEqual(deletedReport.summary, {
+    added: 0, removed: 2, changed: 0, unchanged: 0, tightened: 0, relaxed: 2,
+  })
+  assert.equal(deletedReport.changes.every((item) => item.change === 'removed' && item.impact === 'relaxed'), true)
+
+  const bothAbsent = runCli(['policy', 'diff', '-', '-', '--format', 'json', '--fail-on', 'any'])
+  assert.equal(bothAbsent.status, 0, bothAbsent.stderr)
+  assert.equal(JSON.parse(bothAbsent.stdout).summary.added, 0)
 })
 
 test('policy init writes strict, balanced and permissive presets with the published schema reference', (t) => {

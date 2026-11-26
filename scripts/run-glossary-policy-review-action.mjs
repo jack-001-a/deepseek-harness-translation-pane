@@ -1,4 +1,4 @@
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -62,21 +62,41 @@ if (resolvedBase.error || resolvedBase.status !== 0) {
     String(resolvedBase.stderr || resolvedBase.error?.message || '').trim())
 }
 const baseCommit = resolvedBase.stdout.trim()
-const baseline = spawnSync('git', [
-  'show', baseCommit + ':' + gitPolicyPath.split(sep).join('/'),
-], { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })
-if (baseline.error || baseline.status !== 0) {
-  throw new Error('Unable to read policy-file from policy-base-ref: ' +
-    String(baseline.stderr || baseline.error?.message || '').trim())
+const baselineCheck = spawnSync('git', [
+  'cat-file', '-e', baseCommit + ':' + gitPolicyPath.split(sep).join('/'),
+], { cwd: process.cwd(), encoding: 'utf8' })
+if (baselineCheck.error || ![0, 1].includes(baselineCheck.status)) {
+  throw new Error('Unable to inspect policy-file in policy-base-ref: ' +
+    String(baselineCheck.stderr || baselineCheck.error?.message || '').trim())
 }
+const beforePresent = baselineCheck.status === 0
+const afterPresent = existsSync(absolutePolicyFile)
+if (!beforePresent && !afterPresent) {
+  throw new Error('The policy-file is absent from both policy-base-ref and the current checkout.')
+}
+let baselineContents = ''
+if (beforePresent) {
+  const baseline = spawnSync('git', [
+    'show', baseCommit + ':' + gitPolicyPath.split(sep).join('/'),
+  ], { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })
+  if (baseline.error || baseline.status !== 0) {
+    throw new Error('Unable to read policy-file from policy-base-ref: ' +
+      String(baseline.stderr || baseline.error?.message || '').trim())
+  }
+  baselineContents = baseline.stdout
+}
+const beforeArgument = beforePresent ? 'baseline-policy.json' : '-'
+const afterArgument = afterPresent ? absolutePolicyFile : '-'
+const policyFileChange = !beforePresent ? 'added' : !afterPresent ? 'deleted' : 'present'
 
 const tempDirectory = mkdtempSync(join(tmpdir(), 'dsh-glossary-policy-review-'))
 let exitCode = 2
 try {
   const baselineFile = resolve(tempDirectory, 'baseline-policy.json')
-  writeFileSync(baselineFile, baseline.stdout, 'utf8')
+  if (beforePresent) writeFileSync(baselineFile, baselineContents, 'utf8')
   const result = spawnSync(process.execPath, [
-    cliPath, 'policy', 'diff', baselineFile, absolutePolicyFile,
+    cliPath, 'policy', 'diff', beforeArgument === '-' ? '-' : baselineFile,
+    afterArgument,
     '--format', 'json', '--fail-on', failOn,
   ], { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })
   if (result.error || ![0, 1].includes(result.status)) {
@@ -90,7 +110,8 @@ try {
   } catch {
     throw new Error('The policy diff command returned invalid JSON.')
   }
-  if (report.valid !== true || !report.summary || !Array.isArray(report.changes) ||
+  if (report.valid !== true || report.beforePresent !== beforePresent ||
+    report.afterPresent !== afterPresent || !report.summary || !Array.isArray(report.changes) ||
     !report.gate || typeof report.gate.passed !== 'boolean' ||
     !Number.isInteger(report.gate.failureCount)) {
     throw new Error('The policy diff command returned an incomplete report.')
@@ -113,6 +134,7 @@ try {
     'policy-diff-failure-count': report.gate.failureCount,
     'policy-schema-changed': report.schemaChanged === true,
     'policy-diff-base-commit': baseCommit,
+    'policy-file-change': policyFileChange,
   }
   for (const [name, value] of Object.entries(outputs)) output(name, value, githubOutput)
 
@@ -126,6 +148,7 @@ try {
       '## DSH quality policy review',
       '',
       '- **Base commit:** ' + tick + baseCommit.slice(0, 12) + tick,
+      '- **Policy file:** ' + policyFileChange,
       '- **Review gate:** ' + (report.gate.passed ? 'PASS' : 'FAIL') +
         ' (' + tick + '--fail-on ' + failOn + tick + '; ' +
         report.gate.failureCount + ' blocking changes)',

@@ -491,7 +491,12 @@ steps:
 ```
 
 The Action exposes added, removed, changed, tightened and relaxed counts,
-the resolved baseline commit, gate result and exit code. The full change table
+the resolved baseline commit, gate result, exit code and policy-file lifecycle.
+A newly added policy is compared against an empty policy (all introduced
+thresholds tighten the gate); a deleted policy is compared against an empty
+current policy (all removed thresholds relax the gate). If the policy is
+missing from both revisions, the Action fails instead of silently accepting
+a likely path/configuration mistake. The full change table
 is appended to `GITHUB_STEP_SUMMARY`, including when the selected gate fails.
 As with the glossary-audit Action, the base commit must be available in the
 checkout (`fetch-depth: 0`). See the [GitHub SARIF upload guide](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file).

@@ -34,6 +34,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Show tightened / relaxed impact counts and per-threshold impact in the glossary-audit Action summary and outputs.
 - Let the glossary-audit Action enforce policy-diff regression gates without suppressing its audit or review outputs.
 - Add a standalone glossary-policy-review composite Action that reviews Git policy changes without requiring a glossary audit or sample corpus.
+- Detect newly added and deleted policy files as explicit lifecycle diffs; fail when the policy file is absent from both compared revisions.
 - Clarify overlap precedence: earliest source position wins, then per-position priority, match length and original entry order.
 
 
