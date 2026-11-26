@@ -1,6 +1,7 @@
-import { appendFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { dirname, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
@@ -31,6 +32,7 @@ const sourceLanguage = process.env.INPUT_SOURCE_LANGUAGE || 'auto'
 const targetLanguage = process.env.INPUT_TARGET_LANGUAGE || 'zh-Hans'
 const failOn = process.env.INPUT_FAIL_ON || 'none'
 const policyFile = process.env.INPUT_POLICY_FILE || ''
+const policyBaseRef = process.env.INPUT_POLICY_BASE_REF || ''
 const sarifFile = process.env.INPUT_SARIF_FILE || 'glossary-audit.sarif'
 
 for (const [name, value] of [
@@ -38,6 +40,7 @@ for (const [name, value] of [
   ['INPUT_TARGET_LANGUAGE', targetLanguage],
   ['INPUT_FAIL_ON', failOn],
   ['INPUT_POLICY_FILE', policyFile],
+  ['INPUT_POLICY_BASE_REF', policyBaseRef],
   ['INPUT_SARIF_FILE', sarifFile],
 ]) {
   if (value.includes('\n') || value.includes('\r')) {
@@ -158,4 +161,105 @@ if (summaryFile) {
   ]
   appendFileSync(summaryFile, summaryLines.join('\n'), 'utf8')
 }
+
+const policyDiffCounts = { added: 0, removed: 0, changed: 0, total: 0, schemaChanged: false }
+if (policyBaseRef) {
+  if (!policyFile) {
+    throw new Error('INPUT_POLICY_BASE_REF requires INPUT_POLICY_FILE.')
+  }
+  const absolutePolicyFile = resolve(process.cwd(), policyFile)
+  const gitPolicyPath = relative(process.cwd(), absolutePolicyFile)
+  if (!gitPolicyPath || gitPolicyPath === '..' || gitPolicyPath.startsWith('..' + sep) || isAbsolute(gitPolicyPath)) {
+    throw new Error('The policy-file must resolve to a file inside the Git checkout when policy-base-ref is set.')
+  }
+
+  const resolvedBase = spawnSync('git', [
+    'rev-parse', '--verify', '--end-of-options', policyBaseRef + '^{commit}',
+  ], { cwd: process.cwd(), encoding: 'utf8' })
+  if (resolvedBase.error || resolvedBase.status !== 0) {
+    throw new Error('Unable to resolve policy-base-ref as a Git commit: ' +
+      String(resolvedBase.stderr || resolvedBase.error?.message || '').trim())
+  }
+  const baseCommit = resolvedBase.stdout.trim()
+  const baseline = spawnSync('git', [
+    'show', baseCommit + ':' + gitPolicyPath.split(sep).join('/'),
+  ], { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })
+  if (baseline.error || baseline.status !== 0) {
+    throw new Error('Unable to read policy-file from policy-base-ref: ' +
+      String(baseline.stderr || baseline.error?.message || '').trim())
+  }
+
+  const tempDirectory = mkdtempSync(resolve(tmpdir(), 'dsh-glossary-policy-diff-'))
+  try {
+    const baselineFile = resolve(tempDirectory, 'baseline-policy.json')
+    writeFileSync(baselineFile, baseline.stdout, 'utf8')
+    const diffResult = spawnSync(process.execPath, [
+      cliPath, 'policy', 'diff', baselineFile, absolutePolicyFile, '--format', 'json',
+    ], { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })
+    if (diffResult.error || diffResult.status !== 0) {
+      throw new Error('Unable to compare quality policies: ' +
+        String(diffResult.stderr || diffResult.error?.message || '').trim())
+    }
+
+    let policyDiff
+    try {
+      policyDiff = JSON.parse(diffResult.stdout)
+    } catch {
+      throw new Error('The policy diff command returned invalid JSON.')
+    }
+    if (policyDiff.valid !== true || !policyDiff.summary || !Array.isArray(policyDiff.changes)) {
+      throw new Error('The policy diff command returned an incomplete report.')
+    }
+    policyDiffCounts.added = policyDiff.summary.added
+    policyDiffCounts.removed = policyDiff.summary.removed
+    policyDiffCounts.changed = policyDiff.summary.changed
+    policyDiffCounts.total = policyDiffCounts.added + policyDiffCounts.removed + policyDiffCounts.changed
+    policyDiffCounts.schemaChanged = policyDiff.schemaChanged === true
+
+    output('policy-diff-count', policyDiffCounts.total, githubOutput)
+    output('policy-diff-added-count', policyDiffCounts.added, githubOutput)
+    output('policy-diff-removed-count', policyDiffCounts.removed, githubOutput)
+    output('policy-diff-changed-count', policyDiffCounts.changed, githubOutput)
+    output('policy-schema-changed', policyDiffCounts.schemaChanged, githubOutput)
+
+    if (summaryFile) {
+      const tick = String.fromCharCode(96)
+      const display = (value) => value === null || value === undefined ? '—' : markdownEscape(value)
+      const changed = policyDiff.changes.filter((item) => item.change !== 'unchanged')
+      const lines = [
+        '',
+        '## DSH quality policy diff',
+        '',
+        '- **Base commit:** ' + tick + baseCommit.slice(0, 12) + tick,
+        '- **Threshold changes:** ' + policyDiffCounts.total + ' (' +
+          policyDiffCounts.added + ' added, ' + policyDiffCounts.removed + ' removed, ' +
+          policyDiffCounts.changed + ' changed)',
+      ]
+      if (changed.length) {
+        lines.push('', '| Threshold | Base value | PR value | Change |', '| --- | ---: | ---: | --- |')
+        for (const item of changed) {
+          lines.push('| ' + tick + markdownEscape(item.field) + tick + ' | ' +
+            display(item.before) + ' | ' + display(item.after) + ' | ' + item.change + ' |')
+        }
+      } else {
+        lines.push('', 'No threshold changes detected.')
+      }
+      if (policyDiffCounts.schemaChanged) {
+        lines.push('', '- **JSON Schema reference:** ' + tick + display(policyDiff.schemaBefore) +
+          tick + ' → ' + tick + display(policyDiff.schemaAfter) + tick)
+      }
+      lines.push('', 'This comparison is informational; threshold changes do not fail the audit by themselves.', '')
+      appendFileSync(summaryFile, lines.join('\\n'), 'utf8')
+    }
+  } finally {
+    rmSync(tempDirectory, { recursive: true, force: true })
+  }
+} else {
+  output('policy-diff-count', 0, githubOutput)
+  output('policy-diff-added-count', 0, githubOutput)
+  output('policy-diff-removed-count', 0, githubOutput)
+  output('policy-diff-changed-count', 0, githubOutput)
+  output('policy-schema-changed', false, githubOutput)
+}
+
 output('annotation-count', annotationCount, githubOutput)

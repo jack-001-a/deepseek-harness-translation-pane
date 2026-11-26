@@ -23,6 +23,10 @@ inputs:
     description: Optional version 1 JSON quality policy with coverage and finding thresholds.
     required: false
     default: ''
+  policy-base-ref:
+    description: Optional Git commit or ref to compare against the current policy file. Requires the base commit in the checkout.
+    required: false
+    default: ''
   sarif-file:
     description: SARIF output path relative to the workflow workspace.
     required: false
@@ -43,6 +47,21 @@ outputs:
   annotation-count:
     description: Number of GitHub workflow annotations emitted.
     value: ${{ steps.audit.outputs.annotation-count }}
+  policy-diff-count:
+    description: Number of added, removed or changed quality policy thresholds compared with policy-base-ref.
+    value: ${{ steps.audit.outputs.policy-diff-count }}
+  policy-diff-added-count:
+    description: Number of thresholds added compared with policy-base-ref.
+    value: ${{ steps.audit.outputs.policy-diff-added-count }}
+  policy-diff-removed-count:
+    description: Number of thresholds removed compared with policy-base-ref.
+    value: ${{ steps.audit.outputs.policy-diff-removed-count }}
+  policy-diff-changed-count:
+    description: Number of threshold values changed compared with policy-base-ref.
+    value: ${{ steps.audit.outputs.policy-diff-changed-count }}
+  policy-schema-changed:
+    description: Whether the JSON Schema reference changed compared with policy-base-ref.
+    value: ${{ steps.audit.outputs.policy-schema-changed }}
 runs:
   using: composite
   steps:
@@ -57,6 +76,7 @@ runs:
         INPUT_TARGET_LANGUAGE: ${{ inputs.target-language }}
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
         INPUT_POLICY_FILE: ${{ inputs.policy-file }}
+        INPUT_POLICY_BASE_REF: ${{ inputs.policy-base-ref }}
         INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
       run: node "$ACTION_ROOT/../../../scripts/run-glossary-action.mjs"
     - name: Enforce glossary audit policy

@@ -410,7 +410,7 @@ combine it with `--output` to save a report even when the selected gate fails.
 The repository also includes a reusable composite action at
 `.github/actions/glossary-audit`. It requires Node.js 22 or newer and accepts
 a glossary file, source sample, language pair, failure policy and SARIF path.
-Its outputs expose the report path, finding count, audit result, exit code and annotation count. It emits up to 50 GitHub workflow annotations and appends a coverage / finding summary to `GITHUB_STEP_SUMMARY` when available. Workflow-command message and path values are escaped before output.
+Its outputs expose the report path, finding count, audit result, exit code and annotation count. It emits up to 50 GitHub workflow annotations and appends a coverage / finding summary to `GITHUB_STEP_SUMMARY` when available. Workflow-command message and path values are escaped before output. When `policy-base-ref` is set alongside `policy-file`, it reads the base revision of that policy from Git, compares it with the current file and adds a threshold-by-threshold table to the Job Summary. The comparison counts are exposed as Action outputs and are informational: a policy change alone does not fail the audit. The checkout must include the base commit (use `fetch-depth: 0`).
 
 An optional `--policy` file adds threshold-based checks on top of `--fail-on`. The
 version 1 policy supports `minCoveragePercent`, `maxUnusedRules`,
@@ -436,6 +436,8 @@ permissions:
 
 steps:
   - uses: actions/checkout@v7
+    with:
+      fetch-depth: 0
   - uses: actions/setup-node@v7
     with:
       node-version: 22
@@ -449,6 +451,7 @@ steps:
       target-language: zh-Hans
       fail-on: any
       policy-file: ./config/glossary-policy.json
+      policy-base-ref: ${{ github.event.pull_request.base.sha }}
       sarif-file: ./reports/glossary-audit.sarif
   - name: Upload glossary findings
     if: always() && steps.glossary-audit.outputs.sarif-file != ''
