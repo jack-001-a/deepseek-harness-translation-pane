@@ -28,7 +28,8 @@
  */
 import { Buffer } from 'node:buffer'
 import { ProviderHealth, TokenBucket, TranslationCache } from './src/host/runtime-state.js'
-import { jsonStringValueTokens, markdownSegments, splitText } from './src/host/text.js'
+import { jsonStringValueTokens, splitText } from './src/host/text.js'
+import { markdownSegments } from './src/host/markdown.js'
 export { splitText }
 
 /** Cordis service key and API Gateway wire namespace. */
