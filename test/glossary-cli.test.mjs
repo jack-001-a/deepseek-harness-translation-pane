@@ -601,7 +601,7 @@ test('policy validate rejects invalid policy files and unknown subcommands', (t)
   assert.equal(badJson.status, 2)
   assert.match(badJson.stderr, /Quality policy must be valid JSON/)
   assert.equal(unsupported.status, 2)
-  assert.match(unsupported.stderr, /policy supports the validate and init/)
+  assert.match(unsupported.stderr, /policy supports the validate, init and diff/)
 })
 
 
