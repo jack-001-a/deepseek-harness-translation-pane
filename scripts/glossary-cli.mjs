@@ -15,7 +15,7 @@ const USAGE = [
   '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json]',
   '',
   'Use "-" or omit the glossary file to read glossary JSON from stdin.',
-  'Exit codes: 0 valid/success, 1 invalid glossary, 2 usage or file error.',
+  'Exit codes: 0 success/policy pass, 1 invalid glossary or failed audit policy, 2 usage or file error.',
 ].join('\n')
 
 class CliError extends Error {}
@@ -97,7 +97,7 @@ function validate(args) {
 function preview(args) {
   const { positional, options } = parseOptions(
     args,
-    new Set(['format', 'text', 'text-file', 'source-language', 'target-language']),
+    new Set(['format', 'text', 'text-file', 'source-language', 'target-language', 'fail-on']),
   )
   if (positional.length > 1) throw new CliError('preview accepts at most one glossary file.')
   if (Object.hasOwn(options, 'text') === Object.hasOwn(options, 'text-file')) {
@@ -105,6 +105,11 @@ function preview(args) {
   }
   const format = options.format ?? 'text'
   if (!['text', 'json'].includes(format)) throw new CliError('--format must be "text" or "json".')
+  const failOn = options['fail-on'] ?? 'none'
+  const allowedFailOn = new Set(['none', 'unused', 'shadowed', 'pattern-mismatch', 'out-of-scope', 'any'])
+  if (!allowedFailOn.has(failOn)) {
+    throw new CliError('--fail-on must be one of: none, unused, shadowed, pattern-mismatch, out-of-scope, any.')
+  }
 
   const sourceLanguage = options['source-language'] ?? 'auto'
   const targetLanguage = options['target-language'] ?? 'zh-Hans'
@@ -692,6 +697,25 @@ function audit(args) {
       ? 0
       : Math.round((matchedSourceCodeUnits / sourceCodeUnits) * 10000) / 100,
   }
+  const failCategories = failOn === 'any'
+    ? new Set(['unused', 'shadowed', 'pattern-mismatch', 'out-of-scope'])
+    : failOn === 'none'
+      ? new Set()
+      : new Set([failOn])
+  const allFindings = [
+    { category: 'unused', count: summary.unusedRules, message: 'Glossary rules not observed in the supplied sample.' },
+    { category: 'shadowed', count: summary.shadowedOccurrences, message: 'Glossary occurrences shadowed by higher-precedence matches.' },
+    { category: 'pattern-mismatch', count: summary.patternMismatchRules, message: 'Rules blocked by case or word-boundary matching.' },
+    { category: 'out-of-scope', count: summary.outOfScopeRules, message: 'Rules excluded by the requested language pair.' },
+  ]
+  const failureReasons = allFindings.filter((finding) =>
+    failCategories.has(finding.category) && finding.count > 0,
+  )
+  const ciPolicy = {
+    failOn,
+    passed: failureReasons.length === 0,
+    failureReasons,
+  }
   const report = {
     command: 'audit',
     valid: true,
@@ -699,6 +723,7 @@ function audit(args) {
     targetLanguage,
     providerCalls: 0,
     summary,
+    ciPolicy,
     rules: ruleReports,
     warnings: validation.warnings,
     note: 'Audit metrics describe only the supplied sample. Coverage is the percentage of UTF-16 source code units replaced by winning local glossary matches; shadowed occurrences are excluded. No machine translation or provider request is performed.',
@@ -712,6 +737,9 @@ function audit(args) {
     process.stdout.write(
       'Coverage: ' + summary.coveragePercent + '% (' + matchedSourceCodeUnits +
       '/' + sourceCodeUnits + ' source code units)\n',
+    )
+    process.stdout.write(
+      'CI gate: --fail-on ' + failOn + ' => ' + (ciPolicy.passed ? 'PASS' : 'FAIL') + '\\n',
     )
     process.stdout.write(
       'Rules: ' + summary.totalRules +
@@ -731,7 +759,7 @@ function audit(args) {
     }
     diagnosticLines(validation.warnings, 'WARN')
   }
-  return 0
+  return ciPolicy.passed ? 0 : 1
 }
 
 function main(argv) {

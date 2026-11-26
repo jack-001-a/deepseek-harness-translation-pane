@@ -354,6 +354,11 @@ npm run glossary -- audit path/to/glossary.json \
   --source-language en --target-language zh-Hans \
   --text-file ./samples/source.txt --format json
 
+# Fail CI when any actionable sample finding is present.
+npm run glossary -- audit path/to/glossary.json \
+  --source-language en --target-language zh-Hans \
+  --text-file ./samples/source.txt --fail-on any --format json
+
 # Read the glossary from stdin.
 cat path/to/glossary.json | npm run glossary -- validate -
 ```
@@ -374,9 +379,11 @@ or no source occurrence. Match offsets are zero-based UTF-16 code units. The
 final preview is glossary-only; this command makes no provider requests. `audit`
 aggregates the same decisions over a supplied sample, reporting active, unused,
 fully shadowed, disabled, out-of-scope and pattern-mismatch rules plus the
-percentage of source code units replaced by winning local matches. Audit
-coverage describes only the supplied sample; it is not a corpus-wide guarantee.
-The installed package also exposes the `dsh-translation-glossary` executable.
+percentage of source code units replaced by winning local matches. coverage describes only the supplied sample; it is not a corpus-wide guarantee.
+Use `--fail-on unused|shadowed|pattern-mismatch|out-of-scope|any` to make
+selected findings return exit code 1 for CI; the default `none` preserves a
+successful exit while still reporting findings. The JSON report includes the
+selected policy and its failure reasons. The installed package also exposes the `dsh-translation-glossary` executable.
 
 
 ## Install

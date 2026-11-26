@@ -380,6 +380,40 @@ test('audit text output and CLI help use readable line breaks and list the comma
 })
 
 
+
+test('audit can fail CI selectively while still emitting its JSON report', (t) => {
+  const path = fixture(t, JSON.stringify([
+    { source: 'API', target: '接口', sourceLanguage: 'en', targetLanguage: 'zh-Hans', priority: 5 },
+    { source: 'API Gateway', target: 'API 网关', sourceLanguage: 'en', targetLanguage: 'zh-Hans' },
+    { source: 'Missing', target: '缺失', sourceLanguage: 'en', targetLanguage: 'zh-Hans' },
+    { source: 'Japanese', target: '日文', sourceLanguage: 'ja', targetLanguage: 'zh-Hans' },
+  ]))
+  const common = ['audit', path, '--source-language', 'en', '--target-language', 'zh-Hans', '--text', 'API Gateway', '--format', 'json']
+  const unused = runCli([...common, '--fail-on', 'unused'])
+  const shadowed = runCli([...common, '--fail-on', 'shadowed'])
+  const outOfScope = runCli([...common, '--fail-on', 'out-of-scope'])
+  const mismatch = runCli([...common, '--fail-on', 'pattern-mismatch'])
+  const any = runCli([...common, '--fail-on', 'any'])
+  const invalid = runCli([...common, '--fail-on', 'unknown'])
+
+  assert.equal(unused.status, 1)
+  assert.equal(JSON.parse(unused.stdout).ciPolicy.passed, false)
+  assert.deepEqual(JSON.parse(unused.stdout).ciPolicy.failureReasons.map((item) => item.category), ['unused'])
+  assert.equal(shadowed.status, 1)
+  assert.deepEqual(JSON.parse(shadowed.stdout).ciPolicy.failureReasons.map((item) => item.category), ['shadowed'])
+  assert.equal(outOfScope.status, 1)
+  assert.deepEqual(JSON.parse(outOfScope.stdout).ciPolicy.failureReasons.map((item) => item.category), ['out-of-scope'])
+  assert.equal(mismatch.status, 0)
+  assert.deepEqual(JSON.parse(mismatch.stdout).ciPolicy.failureReasons, [])
+  assert.equal(any.status, 1)
+  assert.deepEqual(JSON.parse(any.stdout).ciPolicy.failureReasons.map((item) => item.category), [
+    'unused', 'shadowed', 'out-of-scope',
+  ])
+  assert.equal(invalid.status, 2)
+  assert.match(invalid.stderr, /--fail-on must be one of/)
+})
+
+
 test('preview refuses malformed language tags and unknown commands with exit code 2', (t) => {
   const path = fixture(t, '[{"source":"API","target":"接口"}]')
   const badLanguage = runCli(['preview', path, '--text', 'API', '--source-language', 'en&to=xx'])
