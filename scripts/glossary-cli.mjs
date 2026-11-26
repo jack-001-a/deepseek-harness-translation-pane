@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs'
 
-import { glossarySegments, parseGlossaryImport } from '../src/host/glossary.js'
+import { glossarySegments, languageScopeMatches, parseGlossaryImport } from '../src/host/glossary.js'
 
 const USAGE = [
   'Usage:',
   '  dsh-translation-glossary validate [file|-] [--format text|json]',
   '  dsh-translation-glossary preview [file|-] (--text <text> | --text-file <path>)',
   '  dsh-translation-glossary diff <before-file|-> <after-file|-> [--format text|json]',
+  '  dsh-translation-glossary explain <file|-> (--text <text> | --text-file <path>)',
+  '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json]',
   '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json]',
   '',
   'Use "-" or omit the glossary file to read glossary JSON from stdin.',
@@ -344,6 +346,239 @@ function diff(args) {
   return 0
 }
 
+
+function literalPositions(source, term) {
+  const foldedSource = source.toLowerCase()
+  const foldedTerm = term.toLowerCase()
+  const positions = []
+  let cursor = 0
+  while (cursor <= foldedSource.length - foldedTerm.length) {
+    const index = foldedSource.indexOf(foldedTerm, cursor)
+    if (index === -1) break
+    positions.push(index)
+    cursor = index + Math.max(1, foldedTerm.length)
+  }
+  return positions
+}
+
+function explainMatches(sourceText, entries, languages) {
+  const details = new Map()
+  const candidates = []
+
+  for (const entry of entries) {
+    const item = {
+      ...glossaryRecord(entry),
+      decision: null,
+      reason: null,
+      matches: [],
+    }
+    details.set(entry.index, item)
+
+    if (entry.enabled === false) {
+      item.decision = 'skipped'
+      item.reason = 'disabled'
+      continue
+    }
+    if (!languageScopeMatches(entry.sourceLanguage ?? '*', languages.sourceLanguage ?? 'auto')) {
+      item.decision = 'skipped'
+      item.reason = 'source-language-mismatch'
+      continue
+    }
+    if (!languageScopeMatches(entry.targetLanguage ?? '*', languages.targetLanguage ?? 'zh-Hans')) {
+      item.decision = 'skipped'
+      item.reason = 'target-language-mismatch'
+      continue
+    }
+
+    const matches = [...sourceText.matchAll(entry.pattern)].map((match) => ({
+      start: match.index,
+      end: match.index + match[0].length,
+      text: match[0],
+      entry,
+    }))
+    for (const match of matches) candidates.push(match)
+
+    if (matches.length === 0) {
+      const positions = literalPositions(sourceText, entry.source)
+      if (positions.length === 0) {
+        item.decision = 'not-matched'
+        item.reason = 'not-found'
+      } else if (
+        entry.matchCase &&
+        !positions.some((position) => sourceText.slice(position, position + entry.source.length) === entry.source)
+      ) {
+        item.decision = 'skipped'
+        item.reason = 'case-mismatch'
+        item.literalOccurrences = positions
+      } else {
+        item.decision = 'skipped'
+        item.reason = 'word-boundary-mismatch'
+        item.literalOccurrences = positions
+      }
+    }
+  }
+
+  candidates.sort(
+    (left, right) =>
+      left.start - right.start ||
+      right.entry.priority - left.entry.priority ||
+      (right.end - right.start) - (left.end - left.start) ||
+      left.entry.index - right.entry.index,
+  )
+
+  const accepted = []
+  let cursor = 0
+  for (const candidate of candidates) {
+    const item = details.get(candidate.entry.index)
+    const occurrence = {
+      start: candidate.start,
+      end: candidate.end,
+      text: candidate.text,
+      target: candidate.entry.target,
+    }
+    if (candidate.start < cursor) {
+      const blockers = accepted
+        .filter((winner) => winner.start < candidate.end && winner.end > candidate.start)
+        .map((winner) => ({
+          source: winner.entry.source,
+          index: winner.entry.index,
+          start: winner.start,
+          end: winner.end,
+        }))
+      item.matches.push({
+        ...occurrence,
+        decision: 'shadowed',
+        reason: 'overlap',
+        blockedBy: blockers,
+      })
+      continue
+    }
+    accepted.push(candidate)
+    cursor = candidate.end
+    item.matches.push({ ...occurrence, decision: 'applied', reason: null })
+  }
+
+  for (const item of details.values()) {
+    if (item.matches.length === 0) continue
+    const applied = item.matches.filter((match) => match.decision === 'applied').length
+    const shadowed = item.matches.length - applied
+    item.decision = applied > 0
+      ? shadowed > 0 ? 'partially-applied' : 'applied'
+      : 'shadowed'
+    item.reason = shadowed > 0
+      ? applied > 0 ? 'some-occurrences-overlapped' : 'overlapped-by-higher-precedence-rule'
+      : null
+  }
+
+  return [...details.values()].sort((left, right) => left.index - right.index)
+}
+
+function explain(args) {
+  const { positional, options } = parseOptions(
+    args,
+    new Set(['format', 'text', 'text-file', 'source-language', 'target-language']),
+  )
+  if (positional.length !== 1) throw new CliError('explain requires exactly one glossary file (use "-" for stdin).')
+  if (Object.hasOwn(options, 'text') === Object.hasOwn(options, 'text-file')) {
+    throw new CliError('explain requires exactly one of --text or --text-file.')
+  }
+  const format = options.format ?? 'text'
+  if (!['text', 'json'].includes(format)) throw new CliError('--format must be "text" or "json".')
+
+  const sourceLanguage = options['source-language'] ?? 'auto'
+  const targetLanguage = options['target-language'] ?? 'zh-Hans'
+  const languagePattern = /^(?:auto|[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)$/u
+  if (!languagePattern.test(sourceLanguage)) {
+    throw new CliError('--source-language must be "auto" or a BCP-47 language tag.')
+  }
+  if (!languagePattern.test(targetLanguage)) {
+    throw new CliError('--target-language must be a BCP-47 language tag.')
+  }
+  if (positional[0] === '-' && options['text-file'] === '-') {
+    throw new CliError('Only one explain input may use stdin ("-").')
+  }
+
+  const input = readTextFile(positional[0], 'glossary file')
+  const validation = parseGlossaryImport(input)
+  if (validation.errors.length > 0) {
+    const report = {
+      command: 'explain',
+      valid: false,
+      ...reportValidation(validation),
+    }
+    if (format === 'json') writeJson(report)
+    else {
+      process.stdout.write('Glossary is invalid; explanation was not generated.\n')
+      diagnosticLines(validation.errors, 'ERROR')
+      diagnosticLines(validation.warnings, 'WARN')
+    }
+    return 1
+  }
+
+  const sourceText = Object.hasOwn(options, 'text')
+    ? options.text
+    : readTextFile(options['text-file'], 'source text file')
+  const languages = { sourceLanguage, targetLanguage }
+  const rules = explainMatches(sourceText, validation.entries, languages)
+  const segments = glossarySegments(sourceText, validation.entries, languages)
+  const previewText = segments.map((segment) => segment.text).join('')
+  const appliedOccurrences = rules.flatMap((rule) =>
+    rule.matches.filter((match) => match.decision === 'applied'),
+  )
+  const shadowedOccurrences = rules.flatMap((rule) =>
+    rule.matches.filter((match) => match.decision === 'shadowed'),
+  )
+  const report = {
+    command: 'explain',
+    valid: true,
+    sourceLanguage,
+    targetLanguage,
+    providerCalls: 0,
+    summary: {
+      rules: rules.length,
+      appliedRules: rules.filter((rule) => rule.decision === 'applied' || rule.decision === 'partially-applied').length,
+      skippedRules: rules.filter((rule) => rule.decision === 'skipped').length,
+      unmatchedRules: rules.filter((rule) => rule.decision === 'not-matched').length,
+      appliedOccurrences: appliedOccurrences.length,
+      shadowedOccurrences: shadowedOccurrences.length,
+    },
+    previewText,
+    rules,
+    warnings: validation.warnings,
+    note: 'This is a local rule explanation and glossary-only preview. Unmatched source text stays unchanged; no machine translation or provider request is performed. Offsets are zero-based UTF-16 code units.',
+  }
+
+  if (format === 'json') {
+    writeJson(report)
+  } else {
+    process.stdout.write('Glossary match explanation (no provider calls)\n')
+    process.stdout.write('Language pair: ' + sourceLanguage + ' -> ' + targetLanguage + '\n')
+    process.stdout.write(
+      'Rules: ' + report.summary.rules +
+      '; applied: ' + report.summary.appliedRules +
+      '; skipped: ' + report.summary.skippedRules +
+      '; unmatched: ' + report.summary.unmatchedRules + '\n',
+    )
+    for (const rule of rules) {
+      process.stdout.write(
+        '[' + rule.index + '] ' + rule.source + ' -> ' + rule.target +
+        ': ' + rule.decision + (rule.reason ? ' (' + rule.reason + ')' : '') + '\n',
+      )
+      for (const match of rule.matches) {
+        const blockers = match.blockedBy?.map((item) => item.source + ' [entry ' + item.index + ']')
+        process.stdout.write(
+          '    ' + match.decision + ' "' + match.text + '" @ ' + match.start + ':' + match.end +
+          (blockers?.length ? '; blocked by ' + blockers.join(', ') : '') + '\n',
+        )
+      }
+    }
+    process.stdout.write('Preview:\n' + previewText + '\n')
+    process.stdout.write('Unmatched source text is unchanged; this is not a machine translation.\n')
+    diagnosticLines(validation.warnings, 'WARN')
+  }
+  return 0
+}
+
 function main(argv) {
   if (argv.length === 0 || (argv.length === 1 && argv[0] === '--help')) {
     process.stdout.write(USAGE + '\n')
@@ -354,6 +589,7 @@ function main(argv) {
     if (command === 'validate') return validate(args)
     if (command === 'preview') return preview(args)
     if (command === 'diff') return diff(args)
+    if (command === 'explain') return explain(args)
     throw new CliError('Unknown command: ' + command)
   } catch (error) {
     process.stderr.write('Error: ' + (error instanceof Error ? error.message : String(error)) + '\n')

@@ -205,6 +205,90 @@ test('diff supports one stdin input and rejects two stdin inputs', (t) => {
   assert.match(invalid.stderr, /Only one diff input/)
 })
 
+test('explain shows applied and shadowed occurrences using Host precedence', (t) => {
+  const path = fixture(t, JSON.stringify([
+    { source: 'DeepSeek', target: '深度求索', sourceLanguage: 'en', targetLanguage: 'zh-Hans' },
+    { source: 'Seek API', target: '搜索接口', sourceLanguage: 'en', targetLanguage: 'zh-Hans', priority: 100 },
+    { source: 'API', target: '接口', sourceLanguage: 'en', targetLanguage: 'zh-Hans' },
+  ]))
+  const result = runCli([
+    'explain', path,
+    '--source-language', 'en',
+    '--target-language', 'zh-Hans',
+    '--text', 'DeepSeek API and API',
+    '--format', 'json',
+  ])
+
+  assert.equal(result.status, 0, result.stderr)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.providerCalls, 0)
+  assert.equal(report.previewText, '深度求索 接口 and 接口')
+  assert.equal(report.summary.appliedOccurrences, 3)
+  const shadowed = report.rules.find((rule) => rule.source === 'Seek API')
+  assert.equal(shadowed.decision, 'shadowed')
+  assert.equal(shadowed.matches[0].reason, 'overlap')
+  assert.equal(shadowed.matches[0].blockedBy[0].source, 'DeepSeek')
+  assert.match(report.note, /UTF-16 code units/)
+})
+
+test('explain diagnoses disabled, language, case, boundary and missing rules', (t) => {
+  const path = fixture(t, JSON.stringify([
+    { source: 'Legacy', target: '旧版', enabled: false },
+    { source: 'API', target: '接口', sourceLanguage: 'fr', targetLanguage: 'zh-Hans' },
+    { source: 'HTTP', target: '超文本传输协议', sourceLanguage: 'en', targetLanguage: 'fr' },
+    { source: 'DeepSeek', target: '深度求索', sourceLanguage: 'en', targetLanguage: 'zh-Hans', matchCase: true },
+    { source: 'API', target: '接口', sourceLanguage: 'en', targetLanguage: 'zh-Hans', wholeWord: true },
+    { source: 'Missing', target: '缺失', sourceLanguage: 'en', targetLanguage: 'zh-Hans' },
+  ]))
+  const result = runCli([
+    'explain', path,
+    '--source-language', 'en',
+    '--target-language', 'zh-Hans',
+    '--text', 'legacy deepseek APIs HTTP',
+    '--format', 'json',
+  ])
+
+  assert.equal(result.status, 0, result.stderr)
+  const report = JSON.parse(result.stdout)
+  const reasonBySource = Object.fromEntries(report.rules.map((rule) => [rule.source, rule.reason]))
+  assert.equal(reasonBySource.Legacy, 'disabled')
+  assert.equal(reasonBySource.API, 'word-boundary-mismatch')
+  assert.equal(reasonBySource.HTTP, 'target-language-mismatch')
+  assert.equal(reasonBySource.DeepSeek, 'case-mismatch')
+  assert.equal(reasonBySource.Missing, 'not-found')
+  assert.equal(report.previewText, 'legacy deepseek APIs HTTP')
+  assert.equal(report.summary.appliedOccurrences, 0)
+})
+
+test('explain separates source-language mismatch and supports text-file input', (t) => {
+  const glossary = fixture(t, '[{"source":"API","target":"接口","sourceLanguage":"ja","targetLanguage":"zh-Hans"}]')
+  const textPath = fixture(t, 'API gateway')
+  const result = runCli([
+    'explain', glossary,
+    '--source-language', 'en',
+    '--target-language', 'zh-Hans',
+    '--text-file', textPath,
+    '--format', 'json',
+  ])
+
+  assert.equal(result.status, 0, result.stderr)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.rules[0].reason, 'source-language-mismatch')
+  assert.equal(report.previewText, 'API gateway')
+})
+
+test('explain rejects two stdin inputs and invalid source arguments', (t) => {
+  const result = runCli([
+    'explain', '-', '--text-file', '-', '--format', 'json',
+  ], '[]')
+  const missingText = runCli(['explain', '-'])
+
+  assert.equal(result.status, 2)
+  assert.match(result.stderr, /Only one explain input/)
+  assert.equal(missingText.status, 2)
+  assert.match(missingText.stderr, /exactly one of --text/)
+})
+
 test('preview refuses malformed language tags and unknown commands with exit code 2', (t) => {
   const path = fixture(t, '[{"source":"API","target":"接口"}]')
   const badLanguage = runCli(['preview', path, '--text', 'API', '--source-language', 'en&to=xx'])

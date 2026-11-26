@@ -344,6 +344,11 @@ npm run glossary -- preview path/to/glossary.json \
 # Review changes between two glossary revisions.
 npm run glossary -- diff old-glossary.json new-glossary.json --format json
 
+# Explain every rule that applies to a source sample.
+npm run glossary -- explain path/to/glossary.json \\
+  --source-language en --target-language zh-Hans \\
+  --text "DeepSeek API" --format json
+
 # Read the glossary from stdin.
 cat path/to/glossary.json | npm run glossary -- validate -
 ```
@@ -357,8 +362,12 @@ provider requests. `diff` compares the normalized rules in two revisions and
 reports added, removed, changed and relatively reordered entries; adding a
 new entry does not make every following entry look reordered. Diff JSON
 includes validation diagnostics for both sides and per-field changes. One diff
-input may come from stdin. The installed package also exposes the
-`dsh-translation-glossary` executable.
+input may come from stdin. `explain` shows each rule's decision and matching
+occurrences, including overlap blockers and reasons for skipped rules such as
+disabled state, language-scope mismatch, case mismatch, word-boundary mismatch
+or no source occurrence. Match offsets are zero-based UTF-16 code units. The
+final preview is glossary-only; this command makes no provider requests. The
+installed package also exposes the `dsh-translation-glossary` executable.
 
 
 ## Install
