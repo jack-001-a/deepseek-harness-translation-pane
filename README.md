@@ -6,6 +6,8 @@ translation page, and a `translate_text` tool for the agent.
 Published as [`@ybbmm/dsh-translation-pane`](https://www.npmjs.com/package/@ybbmm/dsh-translation-pane)
 on npm and on [GitHub](https://github.com/jack-001-a/deepseek-harness-translation-pane).
 
+For security reporting and data-handling boundaries, see [SECURITY.md](SECURITY.md).
+
 **Documentation:** [简体中文](README.zh-CN.md) · [Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md)
 
 
