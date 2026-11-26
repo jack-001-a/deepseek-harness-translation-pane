@@ -1627,6 +1627,43 @@ test('dispatch: the first concurrent fragment failure wins and failed work is ne
   assert.equal(result.cached, false)
 })
 
+test('dispatch: the first failed fragment aborts other already-running provider requests', async (t) => {
+  const calls = []
+  let secondRequestAborted = false
+  mockFetch(async (_url, init) => {
+    const fragment = JSON.parse(init.body)[0]
+    calls.push(fragment)
+    if (fragment.startsWith('a')) {
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      return new Response('bad request', { status: 400 })
+    }
+    return await new Promise((resolve, reject) => {
+      const abort = () => {
+        secondRequestAborted = true
+        reject(init.signal.reason ?? new DOMException('Aborted', 'AbortError'))
+      }
+      if (init.signal.aborted) abort()
+      else init.signal.addEventListener('abort', abort, { once: true })
+    })
+  }, t)
+
+  const h = harness({
+    config: { fragmentChars: 50, maxConcurrency: 2, failover: false, maxRetries: 0, timeoutMs: 1000 },
+  })
+  const source = JSON.stringify({
+    a: 'a'.repeat(50),
+    b: 'b'.repeat(50),
+    c: 'c'.repeat(50),
+  })
+
+  await assert.rejects(
+    h.service.translate({ text: source, targetLanguage: 'en', format: 'json' }),
+    (error) => error.code === 'translation-pane/provider-error',
+  )
+  assert.deepEqual(calls, ['a'.repeat(50), 'b'.repeat(50)])
+  assert.equal(secondRequestAborted, true, 'the in-flight request must be cancelled immediately')
+})
+
 test('JSON mode stops dispatching queued values after the first provider failure', async (t) => {
   const calls = []
   mockFetch(async (_url, init) => {

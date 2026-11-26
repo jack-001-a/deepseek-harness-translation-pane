@@ -319,6 +319,10 @@ function jsonStringValueTokens(source) {
   return tokens
 }
 
+// Reuse the ICU segmenter across fragment boundaries. Its iterator stops
+// at the first boundary that crosses the proposed cut.
+const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+
 /**
  * Keep fragment boundaries on grapheme boundaries whenever the complete
  * grapheme fits. Oversized graphemes may be divided between code points, but
@@ -329,8 +333,7 @@ function jsonStringValueTokens(source) {
  * @returns a safe local boundary.
  */
 function adjustGraphemeBoundary(text, boundary, maxChars) {
-  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
-  for (const item of segmenter.segment(text)) {
+  for (const item of GRAPHEME_SEGMENTER.segment(text)) {
     const start = item.index
     const end = start + item.segment.length
     if (start < boundary && end > boundary) {
@@ -1143,6 +1146,12 @@ export class TranslationPaneService {
    */
   async dispatch(fragments, spec, route, translator, signal) {
     const results = new Array(fragments.length)
+    // A failed fragment must cancel other already-running requests immediately.
+    // Waiting for Promise.all before aborting can otherwise hold the request
+    // open until the global deadline and waste provider capacity.
+    const cancellation = new AbortController()
+    const workerSignal =
+      signal === undefined ? cancellation.signal : AbortSignal.any([signal, cancellation.signal])
     let next = 0
     let failed = false
     let failure
@@ -1157,11 +1166,14 @@ export class TranslationPaneService {
         try {
           results[index] =
             route === 'translator'
-              ? await this.translateFragment(translator, spec, fragments[index], signal)
-              : await this.translateDirect(spec, fragments[index], signal)
+              ? await this.translateFragment(translator, spec, fragments[index], workerSignal)
+              : await this.translateDirect(spec, fragments[index], workerSignal)
         } catch (error) {
-          if (!failed) failure = error
-          failed = true
+          if (!failed) {
+            failure = error
+            failed = true
+            cancellation.abort(error)
+          }
           return
         }
       }
