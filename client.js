@@ -109,6 +109,19 @@ window.__ModuleLoader__.load({
       'notice.mixed': 'More than one service answered this text ({providers}).',
       'route.translator': 'Translation service',
       'route.direct': 'Direct endpoint',
+      'glossary.title': 'Terminology glossary',
+      'glossary.note': 'Import versioned JSON or a legacy array. Changes apply to this Host session; export the JSON and add it to the profile patch to keep it after restart.',
+      'glossary.placeholder': 'Paste glossary JSON here…',
+      'glossary.apply': 'Apply glossary',
+      'glossary.export': 'Copy / export JSON',
+      'glossary.import': 'Import JSON file',
+      'glossary.applied': 'Applied {count} glossary terms to this Host session.',
+      'glossary.exported': 'Glossary JSON copied to the clipboard.',
+      'glossary.invalidFile': 'Could not read this glossary file.',
+      'glossary.warning.duplicate-entry': 'Duplicate source term; the first entry is retained.',
+      'glossary.warning.conflicting-entry': 'A source term has conflicting translations; resolve the duplicate before importing.',
+      'glossary.warning.overlapping-terms': 'Overlapping terms detected. Priority wins first, then the longest match.',
+      'glossary.warningCount': '{count} glossary warnings need review.',
     }
 
     /**
@@ -178,6 +191,19 @@ window.__ModuleLoader__.load({
       'notice.mixed': '这篇文本由多项服务共同完成（{providers}）。',
       'route.translator': '翻译服务',
       'route.direct': '直连端点',
+      'glossary.title': '术语表',
+      'glossary.note': '支持导入版本化 JSON 或旧版数组。修改仅在当前 Host 会话生效；如需重启后保留，请导出 JSON 并写入插件 profile 配置。',
+      'glossary.placeholder': '在此粘贴术语表 JSON…',
+      'glossary.apply': '应用术语表',
+      'glossary.export': '复制 / 导出 JSON',
+      'glossary.import': '导入 JSON 文件',
+      'glossary.applied': '已在当前 Host 会话应用 {count} 条术语。',
+      'glossary.exported': '术语表 JSON 已复制到剪贴板。',
+      'glossary.invalidFile': '无法读取术语表文件。',
+      'glossary.warning.duplicate-entry': '发现重复原文术语，保留第一条。',
+      'glossary.warning.conflicting-entry': '同一原文术语存在不同译法，请先解决冲突。',
+      'glossary.warning.overlapping-terms': '发现术语重叠；将先按优先级、再按最长匹配处理。',
+      'glossary.warningCount': '有 {count} 条术语警告需要检查。',
     }
 
     /**
@@ -288,6 +314,18 @@ window.__ModuleLoader__.load({
 .dshTr-notice { margin: 0 0 12px; padding: 8px 12px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary) 32%, var(--dsw-alias-border-l2)); border-radius: 10px; color: var(--dsw-alias-state-warn-primary); background: color-mix(in srgb, var(--dsw-alias-state-warn-primary) 7%, transparent); font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
 .dshTr-hint { color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 16px; }
 .dshTr-error { margin-top: 12px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--dsw-alias-state-error-primary) 32%, var(--dsw-alias-border-l2)); border-radius: 10px; color: var(--dsw-alias-state-error-primary); background: color-mix(in srgb, var(--dsw-alias-state-error-primary) 7%, transparent); font-size: 12px; line-height: 19px; overflow-wrap: anywhere; }
+.dshTr-glossary { display: grid; gap: 8px; margin-top: 20px; padding: 14px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 12px; background: var(--dsw-alias-bg-layer-1); }
+.dshTr-glossaryHead, .dshTr-glossaryActions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.dshTr-glossaryHead { justify-content: space-between; }
+.dshTr-glossaryTitle { margin: 0; color: var(--dsw-alias-label-primary); font-size: 13px; font-weight: 650; }
+.dshTr-glossaryCount { color: var(--dsw-alias-label-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.dshTr-glossaryArea { width: 100%; min-height: 160px; padding: 10px 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); font: 12px/18px ui-monospace, SFMono-Regular, Consolas, monospace; resize: vertical; }
+.dshTr-glossaryArea:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 1px; }
+.dshTr-glossaryActions { align-items: center; }
+.dshTr-import { display: inline-flex; align-items: center; min-height: 34px; padding: 7px 12px; border: 1px solid var(--dsw-alias-border-l2); border-radius: 8px; color: var(--dsw-alias-label-primary); font-size: 12px; cursor: pointer; }
+.dshTr-import input { max-width: 180px; font-size: 11px; }
+.dshTr-glossaryMessage, .dshTr-glossaryWarnings { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 17px; overflow-wrap: anywhere; }
+.dshTr-glossaryWarnings { padding-left: 18px; color: var(--dsw-alias-state-warn-primary); }
 .dshTr-icon { display: block; }
 @container (max-width: 640px) { .dshTr { padding: 16px; } }
 `
@@ -376,6 +414,20 @@ window.__ModuleLoader__.load({
      * @param signal - cancellation signal for this call.
      * @returns the Host's returned value.
      */
+    function glossaryJson(glossary) {
+      const entries = Array.isArray(glossary) ? glossary.map((entry) => ({
+        source: entry.source,
+        target: entry.target,
+        ...(entry.sourceLanguage && entry.sourceLanguage !== '*' ? { sourceLanguage: entry.sourceLanguage } : {}),
+        ...(entry.targetLanguage && entry.targetLanguage !== '*' ? { targetLanguage: entry.targetLanguage } : {}),
+        ...(entry.matchCase === true ? { matchCase: true } : {}),
+        ...(entry.wholeWord === null || entry.wholeWord === undefined ? {} : { wholeWord: entry.wholeWord }),
+        ...(entry.enabled === false ? { enabled: false } : {}),
+        ...(entry.priority ? { priority: entry.priority } : {}),
+      })) : []
+      return JSON.stringify({ version: 1, glossary: entries }, null, 2)
+    }
+
     async function callHost(ctx, method, args, signal) {
       const connection = optionalService(ctx, 'connection')
       if (connection === undefined || typeof connection.rpc?.call !== 'function') {
@@ -649,6 +701,7 @@ window.__ModuleLoader__.load({
           counter: `${base}-counter`,
           hint: `${base}-hint`,
           note: `${base}-note`,
+          glossary: `${base}-glossary`,
         }
       })
 
@@ -685,7 +738,13 @@ window.__ModuleLoader__.load({
         // otherwise, and empty on an older Host that does not report it.
         providerHealth: {},
         failoverCapable: false,
+        glossary: [],
+        glossaryWarnings: [],
       })
+      const [glossaryDraft, setGlossaryDraft] = React.useState('')
+      const [glossaryBusy, setGlossaryBusy] = React.useState(false)
+      const [glossaryMessage, setGlossaryMessage] = React.useState(null)
+      const glossaryDraftDirtyRef = React.useRef(false)
 
       // The request sequence is the reliable guard against a stale answer:
       // the carrier may not be able to cancel a request that already reached
@@ -728,7 +787,12 @@ window.__ModuleLoader__.load({
               // Whether the Host can actually fall over to another provider;
               // a health warning is only honest when it can.
               failoverCapable: value?.failover === true,
+              glossary: Array.isArray(value?.glossary) ? value.glossary : [],
+              glossaryWarnings: Array.isArray(value?.glossaryWarnings) ? value.glossaryWarnings : [],
             })
+            if (!glossaryDraftDirtyRef.current) {
+              setGlossaryDraft(glossaryJson(value?.glossary))
+            }
             return true
           } catch {
             if (attempt < DESCRIBE_RETRY_DELAYS_MS.length) {
@@ -792,6 +856,69 @@ window.__ModuleLoader__.load({
         },
         [],
       )
+
+      /**
+       * Apply an imported glossary to the live Host. The Host validates the
+       * JSON, reports overlaps and invalidates caches before confirming success.
+       * @returns nothing.
+       */
+      const applyGlossary = React.useCallback(async () => {
+        if (!host.connected || glossaryBusy) return
+        setGlossaryBusy(true)
+        setGlossaryMessage(null)
+        try {
+          const value = await callHost(ctx, 'setGlossary', { payload: glossaryDraft })
+          const nextGlossary = Array.isArray(value?.glossary) ? value.glossary : []
+          const warnings = Array.isArray(value?.warnings) ? value.warnings : []
+          glossaryDraftDirtyRef.current = false
+          setGlossaryDraft(glossaryJson(nextGlossary))
+          setHost((previous) => ({
+            ...previous,
+            glossary: nextGlossary,
+            glossaryWarnings: warnings,
+          }))
+          setGlossaryMessage(
+            warnings.length > 0
+              ? t('glossary.warningCount', { count: warnings.length })
+              : t('glossary.applied', { count: nextGlossary.length }),
+          )
+        } catch (failure) {
+          setGlossaryMessage(diagnosticFor(failure) || t('error.generic'))
+        } finally {
+          setGlossaryBusy(false)
+        }
+      }, [glossaryBusy, glossaryDraft, host.connected, t])
+
+      /**
+       * Copy the active glossary in the portable versioned JSON format.
+       * @returns nothing.
+       */
+      const exportGlossary = React.useCallback(async () => {
+        const copied = await copyText(glossaryJson(host.glossary))
+        setGlossaryMessage(copied ? t('glossary.exported') : t('error.copyFailed'))
+      }, [host.glossary, t])
+
+      /**
+       * Read an uploaded glossary JSON file into the import editor.
+       * @param event - the file input change event.
+       * @returns resolution after the file has been read.
+       */
+      const importGlossaryFile = React.useCallback(async (event) => {
+        const file = event.target.files?.[0]
+        event.target.value = ''
+        if (!file) return
+        if (file.size > 256 * 1024 || typeof file.text !== 'function') {
+          setGlossaryMessage(t('glossary.invalidFile'))
+          return
+        }
+        try {
+          setGlossaryDraft(await file.text())
+          glossaryDraftDirtyRef.current = true
+          setGlossaryMessage(null)
+        } catch {
+          setGlossaryMessage(t('glossary.invalidFile'))
+        }
+      }, [t])
 
       const sourceOptions = React.useMemo(
         () => withValue(languageOptions(host.languages, true), sourceLanguage),
@@ -1387,6 +1514,77 @@ window.__ModuleLoader__.load({
                   zh: detectedSource,
                 },
               ) }))
+            : null,
+        ),
+        h(
+          'section',
+          { className: 'dshTr-glossary', 'aria-labelledby': ids.glossary },
+          h(
+            'div',
+            { className: 'dshTr-glossaryHead' },
+            h('h3', { className: 'dshTr-glossaryTitle', id: ids.glossary }, t('glossary.title')),
+            h('span', { className: 'dshTr-glossaryCount' }, String(host.glossary.length)),
+          ),
+          h('p', { className: 'dshTr-note' }, t('glossary.note')),
+          h('textarea', {
+            className: 'dshTr-glossaryArea',
+            value: glossaryDraft,
+            placeholder: t('glossary.placeholder'),
+            spellCheck: false,
+            'aria-label': t('glossary.title'),
+            onChange: (event) => {
+              glossaryDraftDirtyRef.current = true
+              setGlossaryDraft(event.target.value)
+              setGlossaryMessage(null)
+            },
+          }),
+          h(
+            'div',
+            { className: 'dshTr-glossaryActions' },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dshTr-button',
+                disabled: !host.connected || glossaryBusy || !glossaryDraft.trim(),
+                onClick: () => { void applyGlossary() },
+              },
+              glossaryBusy ? t('action.translating') : t('glossary.apply'),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dshTr-button dshTr-buttonGhost',
+                disabled: host.glossary.length === 0,
+                onClick: () => { void exportGlossary() },
+              },
+              t('glossary.export'),
+            ),
+            h(
+              'label',
+              { className: 'dshTr-import' },
+              t('glossary.import'),
+              h('input', {
+                type: 'file',
+                accept: '.json,application/json',
+                onChange: (event) => { void importGlossaryFile(event) },
+              }),
+            ),
+          ),
+          glossaryMessage !== null
+            ? h('p', { className: 'dshTr-glossaryMessage', role: 'status' }, glossaryMessage)
+            : null,
+          host.glossaryWarnings.length > 0
+            ? h(
+                'ul',
+                { className: 'dshTr-glossaryWarnings', role: 'status' },
+                ...host.glossaryWarnings.map((warning, index) =>
+                  h('li', { key: warning.code + '-' + index },
+                    t('glossary.warning.' + warning.code),
+                  ),
+                ),
+              )
             : null,
         ),
       )
