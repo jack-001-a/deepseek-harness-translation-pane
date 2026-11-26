@@ -319,7 +319,7 @@ export function resolveConfig(config) {
     // Terms are bounded and frozen at service creation; matched source terms
     // are replaced locally and are never sent to the translation provider.
     glossary: glossaryInspection.entries,
-    glossaryWarnings: glossaryInspection.warnings,
+    glossaryWarnings: Object.freeze([...glossaryInspection.errors, ...glossaryInspection.warnings]),
     // The jitter source is injectable so the back-off is exactly testable.
     jitter: typeof raw.jitter === 'function' ? raw.jitter : Math.random,
   })
