@@ -10,6 +10,7 @@ const USAGE = [
   'Usage:',
   '  dsh-translation-glossary validate [file|-] [--format text|json]',
   '  dsh-translation-glossary policy validate <policy-file> [--format text|json]',
+  '  dsh-translation-glossary policy diff <before-file> <after-file> [--format text|json]',
   '  dsh-translation-glossary fix <file> --output <new-file> [--format text|json]',
   '  dsh-translation-glossary preview [file|-] (--text <text> | --text-file <path>)',
   '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json|sarif] [--output <path>]',
@@ -1027,6 +1028,92 @@ function initializeQualityPolicyCommand(args) {
   return 0
 }
 
+
+function diffQualityPolicies(args) {
+  const { positional, options } = parseOptions(args, new Set(['format']))
+  if (positional.length !== 2 || positional.includes('-')) {
+    throw new CliError('policy diff requires exactly two file paths; stdin is not supported.')
+  }
+  const format = options.format ?? 'text'
+  if (!['text', 'json'].includes(format)) throw new CliError('--format must be "text" or "json".')
+
+  function readDocument(filePath) {
+    const input = readTextFile(filePath, 'quality policy file')
+    let document
+    try {
+      document = JSON.parse(input)
+    } catch {
+      throw new CliError('Quality policy must be valid JSON: ' + filePath)
+    }
+    const thresholds = loadQualityPolicy(filePath)
+    return { document, thresholds }
+  }
+
+  const before = readDocument(positional[0])
+  const after = readDocument(positional[1])
+  const fields = [...new Set([
+    ...Object.keys(before.thresholds),
+    ...Object.keys(after.thresholds),
+  ])].sort()
+  const changes = fields.map((field) => {
+    const hasBefore = Object.hasOwn(before.thresholds, field)
+    const hasAfter = Object.hasOwn(after.thresholds, field)
+    const oldValue = hasBefore ? before.thresholds[field] : null
+    const newValue = hasAfter ? after.thresholds[field] : null
+    return {
+      field,
+      change: !hasBefore ? 'added' : !hasAfter ? 'removed' : oldValue !== newValue ? 'changed' : 'unchanged',
+      before: oldValue,
+      after: newValue,
+    }
+  })
+  const summary = {
+    added: changes.filter((item) => item.change === 'added').length,
+    removed: changes.filter((item) => item.change === 'removed').length,
+    changed: changes.filter((item) => item.change === 'changed').length,
+    unchanged: changes.filter((item) => item.change === 'unchanged').length,
+  }
+  const schemaBefore = before.document.$schema ?? null
+  const schemaAfter = after.document.$schema ?? null
+  const report = {
+    command: 'policy diff',
+    valid: true,
+    beforeFile: positional[0],
+    afterFile: positional[1],
+    versionBefore: before.document.version,
+    versionAfter: after.document.version,
+    schemaBefore,
+    schemaAfter,
+    schemaChanged: schemaBefore !== schemaAfter,
+    summary,
+    changes,
+  }
+
+  if (format === 'json') {
+    writeJson(report)
+  } else {
+    process.stdout.write('Quality policy diff: ' +
+      (summary.added + summary.removed + summary.changed) + ' threshold changes\n')
+    if (report.schemaChanged) {
+      process.stdout.write('Schema reference changed: ' +
+        (schemaBefore ?? '(none)') + ' -> ' + (schemaAfter ?? '(none)') + '\n')
+    }
+    for (const change of changes) {
+      if (change.change === 'unchanged') continue
+      if (change.change === 'added') {
+        process.stdout.write('+ ' + change.field + ': ' + change.after + '\n')
+      } else if (change.change === 'removed') {
+        process.stdout.write('- ' + change.field + ': ' + change.before + '\n')
+      } else {
+        process.stdout.write('~ ' + change.field + ': ' + change.before + ' -> ' + change.after + '\n')
+      }
+    }
+    process.stdout.write('Added: ' + summary.added + '; removed: ' + summary.removed +
+      '; changed: ' + summary.changed + '; unchanged: ' + summary.unchanged + '\n')
+  }
+  return 0
+}
+
 function validateQualityPolicyCommand(args) {
   const { positional, options } = parseOptions(args, new Set(['format']))
   if (positional.length !== 1 || positional[0] === '-') {
@@ -1076,8 +1163,9 @@ function main(argv) {
     if (command === 'fix') return fixGlossary(args)
     if (command === 'policy') {
       if (args[0] === 'validate') return validateQualityPolicyCommand(args.slice(1))
+      if (args[0] === 'diff') return diffQualityPolicies(args.slice(1))
       if (args[0] === 'init') return initializeQualityPolicyCommand(args.slice(1))
-      throw new CliError('policy supports the validate and init subcommands.')
+      throw new CliError('policy supports the validate, init and diff subcommands.')
     }
     if (command === 'validate') return validate(args)
     if (command === 'preview') return preview(args)

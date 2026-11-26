@@ -495,6 +495,51 @@ test('policy validate checks a standalone quality policy without glossary or sam
 })
 
 
+
+test('policy diff reports added, removed and changed thresholds plus schema changes', (t) => {
+  const before = fixture(t, JSON.stringify({
+    version: 1,
+    minCoveragePercent: 80,
+    maxUnusedRules: 5,
+  }))
+  const after = fixture(t, JSON.stringify({
+    $schema: './glossary-policy.schema.json',
+    version: 1,
+    minCoveragePercent: 90,
+    maxShadowedOccurrences: 2,
+  }))
+  const result = runCli(['policy', 'diff', before, after, '--format', 'json'])
+  assert.equal(result.status, 0, result.stderr)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.command, 'policy diff')
+  assert.deepEqual(report.summary, { added: 1, removed: 1, changed: 1, unchanged: 0 })
+  assert.equal(report.schemaChanged, true)
+  assert.equal(report.schemaBefore, null)
+  assert.equal(report.schemaAfter, './glossary-policy.schema.json')
+  assert.deepEqual(report.changes.map((item) => [item.field, item.change]), [
+    ['maxShadowedOccurrences', 'added'],
+    ['maxUnusedRules', 'removed'],
+    ['minCoveragePercent', 'changed'],
+  ])
+})
+
+test('policy diff reports unchanged thresholds and rejects invalid inputs', (t) => {
+  const first = fixture(t, '{"version":1,"minCoveragePercent":80,"maxUnusedRules":2}')
+  const second = fixture(t, '{"version":1,"minCoveragePercent":80,"maxUnusedRules":2}')
+  const unchanged = runCli(['policy', 'diff', first, second, '--format', 'json'])
+  assert.equal(unchanged.status, 0, unchanged.stderr)
+  assert.deepEqual(JSON.parse(unchanged.stdout).summary, { added: 0, removed: 0, changed: 0, unchanged: 2 })
+  const oneInput = runCli(['policy', 'diff', first])
+  const twoStdin = runCli(['policy', 'diff', '-', '-'])
+  const invalid = fixture(t, '{"version":1,"unknown":1}')
+  const invalidPolicy = runCli(['policy', 'diff', first, invalid])
+  assert.equal(oneInput.status, 2)
+  assert.equal(twoStdin.status, 2)
+  assert.equal(invalidPolicy.status, 2)
+  assert.match(invalidPolicy.stderr, /Unknown quality policy field/)
+})
+
+
 test('policy init writes strict, balanced and permissive presets with the published schema reference', (t) => {
   const expected = {
     strict: { minCoveragePercent: 95, maxUnusedRules: 0, maxShadowedOccurrences: 0, maxPatternMismatchRules: 0, maxOutOfScopeRules: 0 },
