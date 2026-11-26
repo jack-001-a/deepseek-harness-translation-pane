@@ -41,6 +41,9 @@ test('composite action runner exposes SARIF and the selected policy result', (t)
   assert.match(values, /audit-passed=false/)
   assert.match(values, /finding-count=1/)
   assert.match(values, /annotation-count=1/)
+  assert.match(values, /policy-diff-passed=true/)
+  assert.match(values, /policy-diff-exit-code=0/)
+  assert.match(values, /policy-diff-failure-count=0/)
   assert.match(result.stdout, /::warning file=/)
   const jobSummary = readFileSync(summary, 'utf8')
   assert.match(jobSummary, /## DSH glossary audit/)
@@ -103,6 +106,7 @@ test('composite action runner summarizes policy changes from the selected Git ba
       INPUT_FAIL_ON: 'none', INPUT_SARIF_FILE: sarif,
       INPUT_POLICY_FILE: 'config/glossary-policy.json',
       INPUT_POLICY_BASE_REF: baseRef,
+      INPUT_POLICY_DIFF_FAIL_ON: 'none',
       GITHUB_STEP_SUMMARY: summary,
     },
   })
@@ -124,5 +128,30 @@ test('composite action runner summarizes policy changes from the selected Git ba
   assert.match(jobSummary, /tightened, 1 relaxed/)
   assert.match(jobSummary, /Impact \\| Change/)
   assert.match(jobSummary, /JSON Schema reference/)
-  assert.match(jobSummary, /informational/)
+  assert.match(jobSummary, /selected policy diff gate passed/)
+
+  writeFileSync(output, '', 'utf8')
+  writeFileSync(summary, '', 'utf8')
+  const gated = spawnSync(process.execPath, [ACTION_RUNNER], {
+    cwd: directory,
+    encoding: 'utf8',
+    env: {
+      ...process.env, GITHUB_OUTPUT: output,
+      INPUT_GLOSSARY_FILE: glossary, INPUT_SOURCE_FILE: source,
+      INPUT_SOURCE_LANGUAGE: 'en', INPUT_TARGET_LANGUAGE: 'zh-Hans',
+      INPUT_FAIL_ON: 'none', INPUT_SARIF_FILE: sarif,
+      INPUT_POLICY_FILE: 'config/glossary-policy.json',
+      INPUT_POLICY_BASE_REF: baseRef,
+      INPUT_POLICY_DIFF_FAIL_ON: 'relaxed',
+      GITHUB_STEP_SUMMARY: summary,
+    },
+  })
+  assert.equal(gated.status, 0, gated.stderr)
+  const gatedOutputs = readFileSync(output, 'utf8')
+  assert.match(gatedOutputs, /policy-diff-passed=false/)
+  assert.match(gatedOutputs, /policy-diff-exit-code=1/)
+  assert.match(gatedOutputs, /policy-diff-failure-count=1/)
+  const gatedSummary = readFileSync(summary, 'utf8')
+  assert.match(gatedSummary, /Review gate:\\*\\* FAIL/)
+  assert.match(gatedSummary, /selected policy diff gate failed/)
 })

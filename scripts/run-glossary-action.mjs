@@ -33,6 +33,7 @@ const targetLanguage = process.env.INPUT_TARGET_LANGUAGE || 'zh-Hans'
 const failOn = process.env.INPUT_FAIL_ON || 'none'
 const policyFile = process.env.INPUT_POLICY_FILE || ''
 const policyBaseRef = process.env.INPUT_POLICY_BASE_REF || ''
+const policyDiffFailOn = process.env.INPUT_POLICY_DIFF_FAIL_ON || 'none'
 const sarifFile = process.env.INPUT_SARIF_FILE || 'glossary-audit.sarif'
 
 for (const [name, value] of [
@@ -41,11 +42,19 @@ for (const [name, value] of [
   ['INPUT_FAIL_ON', failOn],
   ['INPUT_POLICY_FILE', policyFile],
   ['INPUT_POLICY_BASE_REF', policyBaseRef],
+  ['INPUT_POLICY_DIFF_FAIL_ON', policyDiffFailOn],
   ['INPUT_SARIF_FILE', sarifFile],
 ]) {
   if (value.includes('\n') || value.includes('\r')) {
     throw new Error('Action inputs must not contain newline characters: ' + name)
   }
+}
+
+if (!['none', 'relaxed', 'tightened', 'any'].includes(policyDiffFailOn)) {
+  throw new Error('INPUT_POLICY_DIFF_FAIL_ON must be none, relaxed, tightened or any.')
+}
+if (policyDiffFailOn !== 'none' && !policyBaseRef) {
+  throw new Error('INPUT_POLICY_DIFF_FAIL_ON requires INPUT_POLICY_BASE_REF.')
 }
 
 const nodeMajor = Number(process.versions.node.split('.')[0])
@@ -165,6 +174,7 @@ if (summaryFile) {
 const policyDiffCounts = {
   added: 0, removed: 0, changed: 0, total: 0,
   tightened: 0, relaxed: 0, schemaChanged: false,
+  passed: true, exitCode: 0, failureCount: 0,
 }
 if (policyBaseRef) {
   if (!policyFile) {
@@ -197,9 +207,10 @@ if (policyBaseRef) {
     const baselineFile = resolve(tempDirectory, 'baseline-policy.json')
     writeFileSync(baselineFile, baseline.stdout, 'utf8')
     const diffResult = spawnSync(process.execPath, [
-      cliPath, 'policy', 'diff', baselineFile, absolutePolicyFile, '--format', 'json',
+      cliPath, 'policy', 'diff', baselineFile, absolutePolicyFile,
+      '--format', 'json', '--fail-on', policyDiffFailOn,
     ], { cwd: process.cwd(), encoding: 'utf8', maxBuffer: 4 * 1024 * 1024 })
-    if (diffResult.error || diffResult.status !== 0) {
+    if (diffResult.error || ![0, 1].includes(diffResult.status)) {
       throw new Error('Unable to compare quality policies: ' +
         String(diffResult.stderr || diffResult.error?.message || '').trim())
     }
@@ -210,8 +221,13 @@ if (policyBaseRef) {
     } catch {
       throw new Error('The policy diff command returned invalid JSON.')
     }
-    if (policyDiff.valid !== true || !policyDiff.summary || !Array.isArray(policyDiff.changes)) {
+    if (policyDiff.valid !== true || !policyDiff.summary || !Array.isArray(policyDiff.changes) ||
+      !policyDiff.gate || typeof policyDiff.gate.passed !== 'boolean' ||
+      !Number.isInteger(policyDiff.gate.failureCount)) {
       throw new Error('The policy diff command returned an incomplete report.')
+    }
+    if ((diffResult.status === 0) !== policyDiff.gate.passed) {
+      throw new Error('The policy diff command exit code does not match its review gate result.')
     }
     policyDiffCounts.added = policyDiff.summary.added
     policyDiffCounts.removed = policyDiff.summary.removed
@@ -220,6 +236,9 @@ if (policyBaseRef) {
     policyDiffCounts.relaxed = policyDiff.summary.relaxed
     policyDiffCounts.total = policyDiffCounts.added + policyDiffCounts.removed + policyDiffCounts.changed
     policyDiffCounts.schemaChanged = policyDiff.schemaChanged === true
+    policyDiffCounts.passed = policyDiff.gate.passed
+    policyDiffCounts.exitCode = diffResult.status
+    policyDiffCounts.failureCount = policyDiff.gate.failureCount
 
     output('policy-diff-count', policyDiffCounts.total, githubOutput)
     output('policy-diff-added-count', policyDiffCounts.added, githubOutput)
@@ -227,6 +246,9 @@ if (policyBaseRef) {
     output('policy-diff-changed-count', policyDiffCounts.changed, githubOutput)
     output('policy-diff-tightened-count', policyDiffCounts.tightened, githubOutput)
     output('policy-diff-relaxed-count', policyDiffCounts.relaxed, githubOutput)
+    output('policy-diff-passed', policyDiffCounts.passed, githubOutput)
+    output('policy-diff-exit-code', policyDiffCounts.exitCode, githubOutput)
+    output('policy-diff-failure-count', policyDiffCounts.failureCount, githubOutput)
     output('policy-schema-changed', policyDiffCounts.schemaChanged, githubOutput)
 
     if (summaryFile) {
@@ -238,6 +260,9 @@ if (policyBaseRef) {
         '## DSH quality policy diff',
         '',
         '- **Base commit:** ' + tick + baseCommit.slice(0, 12) + tick,
+        '- **Review gate:** ' + (policyDiffCounts.passed ? 'PASS' : 'FAIL') +
+          ' (' + tick + '--fail-on ' + policyDiffFailOn + tick + '; ' +
+          policyDiffCounts.failureCount + ' blocking changes)',
         '- **Threshold changes:** ' + policyDiffCounts.total + ' (' +
           policyDiffCounts.added + ' added, ' + policyDiffCounts.removed + ' removed, ' +
           policyDiffCounts.changed + ' changed; ' + policyDiffCounts.tightened +
@@ -257,7 +282,9 @@ if (policyBaseRef) {
         lines.push('', '- **JSON Schema reference:** ' + tick + display(policyDiff.schemaBefore) +
           tick + ' → ' + tick + display(policyDiff.schemaAfter) + tick)
       }
-      lines.push('', 'This comparison is informational; threshold changes do not fail the audit by themselves.', '')
+      lines.push('', policyDiffCounts.passed
+        ? 'The selected policy diff gate passed.'
+        : 'The selected policy diff gate failed; review the threshold changes before merging.', '')
       appendFileSync(summaryFile, lines.join('\\n'), 'utf8')
     }
   } finally {
@@ -268,6 +295,11 @@ if (policyBaseRef) {
   output('policy-diff-added-count', 0, githubOutput)
   output('policy-diff-removed-count', 0, githubOutput)
   output('policy-diff-changed-count', 0, githubOutput)
+  output('policy-diff-tightened-count', 0, githubOutput)
+  output('policy-diff-relaxed-count', 0, githubOutput)
+  output('policy-diff-passed', true, githubOutput)
+  output('policy-diff-exit-code', 0, githubOutput)
+  output('policy-diff-failure-count', 0, githubOutput)
   output('policy-schema-changed', false, githubOutput)
 }
 
