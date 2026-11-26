@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { jsonStringValueTokens, markdownSegments, splitText } from '../src/host/text.js'
+import { jsonStringValueTokens, splitText } from '../src/host/text.js'
+import { markdownSegments } from '../src/host/markdown.js'
 
 test('JSON token scanning returns string values but never object keys', () => {
   const source = JSON.stringify({
