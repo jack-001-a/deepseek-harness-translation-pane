@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "minCoveragePercent": 95,
+  "maxUnusedRules": 0,
+  "maxShadowedOccurrences": 0,
+  "maxPatternMismatchRules": 0,
+  "maxOutOfScopeRules": 0,
+  "$schema": "./glossary-policy.schema.json"
+}
