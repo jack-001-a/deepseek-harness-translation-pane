@@ -44,6 +44,86 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Require integer values for integer-valued configuration options, so fractional
+  values fall back to documented defaults instead of flooring to zero.
+- Reject provider endpoint URLs containing user information or fragments, in
+  line with the configuration contract.
+- Honor valid `Retry-After` delays independently of the local exponential
+  back-off ceiling, while keeping the whole-request deadline authoritative.
+
+### Changed
+
+- Extract the Host cache, provider-health and token-bucket primitives into a
+  dependency-free internal module, with focused unit tests and explicit npm
+  package inclusion. Runtime behavior and public APIs remain unchanged.
+
+- Move Markdown-aware text splitting and JSON string-value token scanning into
+  a dependency-free Host text-processing module, retaining the existing
+  `splitText` entrypoint export.
+
+
+### Changed
+
+- Extract the Host cache, provider-health and token-bucket primitives into a
+  dependency-free internal module, with focused unit tests and explicit npm
+  package inclusion. Runtime behavior and public APIs remain unchanged.
+
+- Move Markdown-aware text splitting and JSON string-value token scanning into
+  a dependency-free Host text-processing module, retaining the existing
+  `splitText` entrypoint export.
+
+
+### Fixed
+
+- Require integer values for integer-valued configuration options, so fractional
+  values fall back to documented defaults instead of flooring to zero.
+- Reject provider endpoint URLs containing user information or fragments, in
+  line with the configuration contract.
+- Honor valid `Retry-After` delays independently of the local exponential
+  back-off ceiling, while keeping the whole-request deadline authoritative.
+
+### Changed
+
+- Extract the Host cache, provider-health and token-bucket primitives into a
+  dependency-free internal module, with focused unit tests and explicit npm
+  package inclusion. Runtime behavior and public APIs remain unchanged.
+
+- Move Markdown-aware text splitting and JSON string-value token scanning into
+  a dependency-free Host text-processing module, retaining the existing
+  `splitText` entrypoint export.
+
+
+### Changed
+
+- Extract the Host cache, provider-health and token-bucket primitives into a
+  dependency-free internal module, with focused unit tests and explicit npm
+  package inclusion. Runtime behavior and public APIs remain unchanged.
+
+- Move Markdown-aware text splitting and JSON string-value token scanning into
+  a dependency-free Host text-processing module, retaining the existing
+  `splitText` entrypoint export.
+
+## [1.3.0] — 2026-11-21
+
+### Added
+
+- Add opt-in JSON translation mode for the panel and `translate_text` tool. Only
+  JSON string values are sent to the selected provider; object keys, numbers,
+  booleans, null values, nesting, and original whitespace remain unchanged.
+- Add real DeepSeek Harness compatibility checks against pinned 0.2.2-rc.4 and
+  0.2.2-rc.5 revisions.
+
+### Changed
+
+- Disclose external provider processing, the request data sent to Microsoft or
+  Google, and the possibility of cross-provider failover before sensitive text
+  is submitted.
+- Keep inline code, template placeholders, HTML/XML tags, Markdown links,
+  URLs, fences, and Unicode grapheme clusters intact at fragment boundaries
+  whenever they fit within the provider request limit.
+
+### Fixed
+
 - Stop dispatching queued fragments after a provider request fails; allow
   already-running fragments to settle before returning the failure.
 - Harden cancellation, request coalescing, timeout handling, and service unload
