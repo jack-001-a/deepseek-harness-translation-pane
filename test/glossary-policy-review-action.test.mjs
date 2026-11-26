@@ -34,7 +34,10 @@ function createRepository(t, currentPolicy, { basePolicy = { version: 1, minCove
   }
   git('commit', '-q', '-m', 'baseline policy')
   const baseRef = git('rev-parse', 'HEAD')
-  if (currentPolicyPresent) writeFileSync(policy, JSON.stringify(currentPolicy), 'utf8')
+  if (currentPolicyPresent) {
+    const contents = typeof currentPolicy === 'string' ? currentPolicy : JSON.stringify(currentPolicy)
+    writeFileSync(policy, contents, 'utf8')
+  } else rmSync(policy, { force: true })
   else rmSync(policy, { force: true })
   writeFileSync(output, '', 'utf8')
   writeFileSync(summary, '', 'utf8')
@@ -160,6 +163,14 @@ test('standalone policy review action rejects a policy missing from both revisio
   const result = runReview(fixture, 'none')
   assert.notEqual(result.status, 0)
   assert.match(result.stderr, /absent from both policy-base-ref and the current checkout/)
+})
+
+
+test('standalone policy review action rejects a present but malformed policy instead of treating it as absent', (t) => {
+  const fixture = createRepository(t, '{invalid-json')
+  const result = runReview(fixture, 'none')
+  assert.notEqual(result.status, 0)
+  assert.match(result.stderr, /Quality policy must be valid JSON/)
 })
 
 test('standalone policy review action rejects invalid modes and policy paths outside the checkout', (t) => {

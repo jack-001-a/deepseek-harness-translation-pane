@@ -5,7 +5,7 @@ inputs:
     description: Path to the current version 1 JSON quality policy in the checkout.
     required: true
   policy-base-ref:
-    description: Git commit or ref containing the baseline version of policy-file.
+    description: Git commit or ref to compare against; the policy file may be absent from either revision, but not both.
     required: true
   fail-on:
     description: none, relaxed, tightened, or any. Controls which threshold changes fail the action.
