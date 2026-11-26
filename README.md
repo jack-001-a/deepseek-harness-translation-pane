@@ -114,19 +114,21 @@ refused with a readable message instead of being truncated silently.
 
 The plugin does not make translation local. Unless the shipped Harness
 translator is selected and configured to use a different provider, the direct
-route sends the source text to the selected anonymous Microsoft Edge/Bing or
-Google Translate endpoint. The provider that serves a fragment may differ from
-the requested provider when failover is enabled. A long document can be sent
+route sends only fragments that remain after local glossary replacement and
+format-specific structural filtering to the selected anonymous Microsoft
+Edge/Bing or Google Translate endpoint. The provider that serves a fragment
+may differ from the requested provider when failover is enabled. A long document can be sent
 as several fragment requests, and a single document can be served by both
 providers.
 
 - **What leaves the Host.** In plain-text mode, only unmatched text segments
   are sent; configured glossary source terms are replaced locally with their
-  preferred target wording. In JSON mode, only decoded string-value segments
-  that are not matched by the glossary are sent; object keys, structural
-  punctuation, whitespace, numbers, booleans and null remain local. In
-  Markdown mode, only prose segments are sent; code, URLs, link destinations,
-  placeholders, HTML tags and Markdown syntax stay local. Do not submit secrets,
+  preferred target wording. The source-language hint (when supplied), target
+  language and protocol metadata are also sent. In JSON mode, only decoded
+  string-value segments that are not matched by the glossary are sent; object
+  keys, structural punctuation, whitespace, numbers, booleans and null remain
+  local. In Markdown mode, only prose segments are sent; code, URLs, link
+  destinations, placeholders, HTML tags and Markdown syntax stay local. Do not submit secrets,
   credentials, personal data or confidential source code unless the user is
   authorized to disclose them to that provider.
 - **Who receives it.** Microsoft receives requests routed to the Edge/Bing
