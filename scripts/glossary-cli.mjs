@@ -1128,14 +1128,14 @@ function diffQualityPolicies(args) {
     writeJson(report)
   } else {
     process.stdout.write('Quality policy diff: ' +
-      (summary.added + summary.removed + summary.changed) + ' threshold changes\\n')
+      (summary.added + summary.removed + summary.changed) + ' threshold changes\n')
     process.stdout.write(
-      'Impact: ' + summary.tightened + ' tightened; ' + summary.relaxed + ' relaxed\\n',
+      'Impact: ' + summary.tightened + ' tightened; ' + summary.relaxed + ' relaxed\n',
     )
-    process.stdout.write('Review gate: --fail-on ' + failOn + ' => ' + (gate.passed ? 'PASS' : 'FAIL') + '\\n')
+    process.stdout.write('Review gate: --fail-on ' + failOn + ' => ' + (gate.passed ? 'PASS' : 'FAIL') + '\n')
     if (schemaChanged) {
       process.stdout.write('Schema reference changed: ' +
-        (schemaBefore ?? '(none)') + ' -> ' + (schemaAfter ?? '(none)') + '\\n')
+        (schemaBefore ?? '(none)') + ' -> ' + (schemaAfter ?? '(none)') + '\n')
     }
     for (const change of changes) {
       if (change.change === 'unchanged') continue
@@ -1143,13 +1143,13 @@ function diffQualityPolicies(args) {
       process.stdout.write(symbol + ' ' + change.field + ': ' +
         (change.before === null ? '(none)' : change.before) + ' -> ' +
         (change.after === null ? '(none)' : change.after) +
-        ' [' + change.impact + ']\\n')
+        ' [' + change.impact + ']\n')
     }
     process.stdout.write('Added: ' + summary.added + '; removed: ' + summary.removed +
-      '; changed: ' + summary.changed + '; unchanged: ' + summary.unchanged + '\\n')
+      '; changed: ' + summary.changed + '; unchanged: ' + summary.unchanged + '\n')
     if (!gate.passed) {
       process.stdout.write('Policy diff gate failed: ' + failureCount +
-        ' threshold change(s) matched --fail-on ' + failOn + '.\\n')
+        ' threshold change(s) matched --fail-on ' + failOn + '.\n')
     }
   }
   return gate.passed ? 0 : 1
