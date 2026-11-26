@@ -1565,17 +1565,18 @@ test('Markdown mode sends only prose to the provider and restores protected synt
   }, t)
   const h = harness({ config: { fragmentChars: 100 } })
   const tick = String.fromCharCode(96)
+  const fence = tick.repeat(3)
   const source = [
     '# Welcome **reader**',
     '',
     '- Read ' + tick + 'const value = 1' + tick + ' and [the guide](https://example.test/docs).',
-    '- Keep {{account.name}} and \${runtime.value} unchanged.',
+    '- Keep {{account.name}} and ' + '$' + '{runtime.value} unchanged.',
     '',
-    '\`\`\`js',
+    fence + 'js',
     'const secret = "do not translate";',
-    '\`\`\`',
+    fence,
     'Use <kbd>Ctrl</kbd> and https://example.test/path.',
-  ].join('\\n')
+  ].join('\n')
   const result = await h.service.translate({
     text: source,
     targetLanguage: 'zh-Hans',
@@ -1588,7 +1589,7 @@ test('Markdown mode sends only prose to the provider and restores protected synt
     'const value = 1',
     'https://example.test/docs',
     '{{account.name}}',
-    '\${runtime.value}',
+    '$' + '{runtime.value}',
     'const secret = "do not translate";',
     '<kbd>',
     '</kbd>',
@@ -1597,7 +1598,7 @@ test('Markdown mode sends only prose to the provider and restores protected synt
     assert.equal(submitted.includes(token), false, token + ' must not reach the provider')
     assert.ok(result.text.includes(token), token + ' must be restored unchanged')
   }
-  assert.ok(result.text.includes('\`\`\`js\\nconst secret = "do not translate";\\n\`\`\`'))
+  assert.ok(result.text.includes(fence + 'js\nconst secret = "do not translate";\n' + fence))
   assert.ok(result.text.startsWith('# WELCOME **READER**'))
   assert.ok(result.text.includes('[THE GUIDE](https://example.test/docs)'))
   assert.equal(result.provider, 'bing')
@@ -1610,7 +1611,9 @@ test('Markdown code-only documents do not make provider requests', async (t) => 
     return jsonResponse(bingPayload('unexpected'))
   }, t)
   const h = harness()
-  const source = '\`\`\`json\\n{"secret":"value"}\\n\`\`\`\\n\`const x = 1\`'
+  const tick = String.fromCharCode(96)
+  const fence = tick.repeat(3)
+  const source = fence + 'json\n{"secret":"value"}\n' + fence + '\n' + tick + 'const x = 1' + tick
   const result = await h.service.translate({
     text: source,
     targetLanguage: 'zh-Hans',
@@ -1631,18 +1634,17 @@ test('translate_text agent tool exposes and forwards Markdown format', async (t)
   const h = harness()
   const tool = h.tools.find((entry) => entry.name === 'translate_text')
   assert.deepEqual(tool.parameters.properties.format.enum, ['text', 'json', 'markdown'])
+  const tick = String.fromCharCode(96)
+  const fence = tick.repeat(3)
+  const source = ['# Hello', '', fence + 'js', 'const value = 1', fence].join('\n')
   const result = await tool.execute(
-    {
-      text: '# Hello\\n\\n\`\`\`js\\nconst value = 1\\n\`\`\`',
-      targetLanguage: 'zh-Hans',
-      format: 'markdown',
-    },
+    { text: source, targetLanguage: 'zh-Hans', format: 'markdown' },
     { signal: new AbortController().signal },
   )
   assert.ok(submitted.length > 0)
-  assert.equal(submitted.join(''), '# Hello\\n\\n')
-  assert.ok(result.text.startsWith('T:# Hello'))
-  assert.ok(result.text.includes('\`\`\`js\\nconst value = 1\\n\`\`\`'))
+  assert.equal(submitted.join(''), 'Hello\n\n')
+  assert.ok(result.text.startsWith('# T:Hello'))
+  assert.ok(result.text.includes(fence + 'js\nconst value = 1\n' + fence))
 })
 
 test('format is part of the cache key and defaults to text', async (t) => {
