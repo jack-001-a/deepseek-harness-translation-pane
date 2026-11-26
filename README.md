@@ -263,7 +263,8 @@ or invalid.
 | `retryBaseMs` | `250` | First back-off delay |
 | `retryMaxMs` | `4000` | Ceiling of the back-off delay |
 | `maxResponseBytes` | `1048576` | Largest provider response accepted |
-| `cacheSize` | `64` | Maximum number of finished translations retained; `0` disables the cache |\n| `cacheMaxBytes` | `8388608` | Approximate UTF-8 byte budget for retained keys and translations, plus per-entry overhead; `0` disables the cache |
+| `cacheSize` | `64` | Maximum number of finished translations retained; `0` disables the cache |
+| `cacheMaxBytes` | `8388608` | Approximate UTF-8 byte budget for retained keys and translations, plus per-entry overhead; `0` disables the cache |
 | `rateLimitPerMinute` | `60` | Token bucket across all callers |
 | `maxConcurrency` | `3` | Fragments of one long request in flight at once |
 
