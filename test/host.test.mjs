@@ -225,6 +225,7 @@ test('config: the defaults are the documented ones', () => {
   assert.equal(config.cacheSize, 64)
   assert.equal(config.rateLimitPerMinute, 60)
   assert.equal(config.maxConcurrency, 3)
+  assert.equal(config.maxQueuedRequests, 24)
 })
 
 test('config: sensible overrides are accepted and unusable values fall back', () => {
@@ -241,6 +242,7 @@ test('config: sensible overrides are accepted and unusable values fall back', ()
     cacheSize: 0,
     rateLimitPerMinute: 5,
     maxConcurrency: 7,
+    maxQueuedRequests: 9,
     maxResponseBytes: 2048,
   })
   assert.equal(config.bingEndpoint, 'https://example.test/translate')
@@ -255,6 +257,7 @@ test('config: sensible overrides are accepted and unusable values fall back', ()
   assert.equal(config.cacheSize, 0)
   assert.equal(config.rateLimitPerMinute, 5)
   assert.equal(config.maxConcurrency, 7)
+  assert.equal(config.maxQueuedRequests, 9)
   assert.equal(config.maxResponseBytes, 2048)
 
   const broken = resolveConfig({
@@ -266,6 +269,7 @@ test('config: sensible overrides are accepted and unusable values fall back', ()
     maxTextChars: 'many',
     maxRetries: -3,
     rateLimitPerMinute: 0,
+    maxQueuedRequests: -1,
   })
   assert.equal(broken.bingEndpoint, 'https://edge.microsoft.com/translate/translatetext')
   assert.equal(broken.timeoutMs, 20000)
@@ -275,6 +279,7 @@ test('config: sensible overrides are accepted and unusable values fall back', ()
   assert.equal(broken.maxTextChars, 20000)
   assert.equal(broken.maxRetries, 2)
   assert.equal(broken.rateLimitPerMinute, 60)
+  assert.equal(broken.maxQueuedRequests, 24)
 
   // One attempt can never outlive the whole request.
   assert.equal(resolveConfig({ timeoutMs: 800, attemptTimeoutMs: 5000 }).attemptTimeoutMs, 800)
@@ -294,6 +299,10 @@ test('describe: it reports the routing facts the browser needs', () => {
     'languages',
     'maxRetries',
     'maxTextChars',
+    'maxConcurrency',
+    'maxQueuedRequests',
+    'activeRequests',
+    'queuedRequests',
     'providerHealth',
     'providers',
     'rateLimitPerMinute',
@@ -306,6 +315,10 @@ test('describe: it reports the routing facts the browser needs', () => {
   assert.equal(described.fragmentChars, 3000)
   assert.equal(described.maxRetries, 2)
   assert.equal(described.rateLimitPerMinute, 60)
+  assert.equal(described.maxConcurrency, 3)
+  assert.equal(described.maxQueuedRequests, 24)
+  assert.equal(described.activeRequests, 0)
+  assert.equal(described.queuedRequests, 0)
   assert.equal(described.cacheEntries, 0)
   assert.equal(described.cacheHits, 0)
   assert.equal(described.cacheMisses, 0)
@@ -1276,6 +1289,100 @@ test('concurrency: the fragments are dispatched with a bounded concurrency', asy
   const h = harness({ config: { fragmentChars: 50, maxConcurrency: 2 } })
   await h.service.translate({ text: 'a'.repeat(200), targetLanguage: 'en' })
   assert.equal(peak, 2, 'the concurrency must be bounded by the configuration')
+})
+
+test('concurrency: distinct translation demands share one service-wide limit', async (t) => {
+  let running = 0
+  let peak = 0
+  mockFetch(async () => {
+    running += 1
+    peak = Math.max(peak, running)
+    await new Promise((resolve) => setTimeout(resolve, 8))
+    running -= 1
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness({ config: { maxConcurrency: 2 } })
+  await Promise.all(
+    ['first', 'second', 'third', 'fourth'].map((text) =>
+      h.service.translateRequest({ text, targetLanguage: 'en' }),
+    ),
+  )
+  assert.equal(peak, 2, 'unique requests must share the same provider concurrency budget')
+})
+
+test('scheduler: FIFO waiters are cancellable and do not consume slots after leaving', async (t) => {
+  let releaseFirst
+  let signalFirstStarted
+  const firstStarted = new Promise((resolve) => {
+    signalFirstStarted = resolve
+  })
+  const started = []
+  mockFetch(async (_url, init) => {
+    const source = JSON.parse(init.body)[0]
+    started.push(source)
+    if (source === 'first') {
+      signalFirstStarted()
+      await new Promise((resolve) => {
+        releaseFirst = resolve
+      })
+    }
+    return jsonResponse(bingPayload(source))
+  }, t)
+
+  const h = harness({ config: { maxConcurrency: 1, maxQueuedRequests: 2 } })
+  const first = h.service.translateRequest({ text: 'first', targetLanguage: 'en' })
+  await firstStarted
+
+  const controller = new AbortController()
+  const second = h.service.translateRequest(
+    { text: 'second', targetLanguage: 'en' },
+    controller.signal,
+  )
+  const third = h.service.translateRequest({ text: 'third', targetLanguage: 'en' })
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  assert.equal(h.service.describe().queuedRequests, 2)
+
+  controller.abort(new Error('the queued caller no longer wants this result'))
+  await assert.rejects(second, /queued caller no longer wants this result/)
+  assert.equal(h.service.describe().queuedRequests, 1, 'cancellation must remove the waiter immediately')
+
+  releaseFirst()
+  await Promise.all([first, third])
+  assert.deepEqual(started, ['first', 'third'], 'the cancelled demand must never reach the provider')
+  assert.equal(h.service.describe().activeRequests, 0)
+  assert.equal(h.service.describe().queuedRequests, 0)
+})
+
+test('scheduler: a full FIFO queue refuses excess work with the busy code', async (t) => {
+  let releaseFirst
+  let signalFirstStarted
+  const firstStarted = new Promise((resolve) => {
+    signalFirstStarted = resolve
+  })
+  mockFetch(async (_url, init) => {
+    const source = JSON.parse(init.body)[0]
+    if (source === 'first') {
+      signalFirstStarted()
+      await new Promise((resolve) => {
+        releaseFirst = resolve
+      })
+    }
+    return jsonResponse(bingPayload(source))
+  }, t)
+
+  const h = harness({ config: { maxConcurrency: 1, maxQueuedRequests: 1 } })
+  const first = h.service.translateRequest({ text: 'first', targetLanguage: 'en' })
+  await firstStarted
+  const second = h.service.translateRequest({ text: 'second', targetLanguage: 'en' })
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  await assert.rejects(
+    h.service.translateRequest({ text: 'third', targetLanguage: 'en' }),
+    (error) => error.code === 'translation-pane/busy',
+  )
+  assert.equal(h.service.describe().queuedRequests, 1)
+  releaseFirst()
+  await Promise.all([first, second])
 })
 
 test('logging: the source text never reaches the log', async (t) => {
