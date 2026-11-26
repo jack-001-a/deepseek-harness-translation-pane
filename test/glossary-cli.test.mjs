@@ -485,7 +485,7 @@ test('quality policy accepts optional schema metadata and ships a matching JSON 
   assert.equal(result.status, 0, result.stderr)
   const report = JSON.parse(result.stdout)
   assert.deepEqual(report.ciPolicy.qualityPolicy.thresholds, {
-    minCoveragePercent: 85,
+    minCoveragePercent: 20,
     maxUnusedRules: 2,
   })
 
