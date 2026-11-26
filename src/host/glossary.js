@@ -72,8 +72,9 @@ function compileEntry(entry) {
  * Inspect, validate and normalize raw glossary terms.
  *
  * Duplicate source terms within the same language scope are diagnosed;
- * conflicting translations are errors. Overlapping terms are warnings because
- * the matcher resolves them deterministically by priority, then length.
+ * conflicting translations are errors. Overlap warnings describe the
+ * deterministic matcher: earliest source position wins, then priority,
+ * match length and original entry order for candidates at the same position.
  *
  * @param raw - the profile or imported glossary array.
  * @returns sanitized entries and serializable diagnostics.
@@ -197,8 +198,8 @@ export function inspectGlossary(raw) {
     entries.push(entry)
   }
 
-  // Warn when two enabled terms in the same language scope overlap. Longest
-  // match and explicit priority make the winner reproducible.
+  // Warn when enabled terms in the same language scope overlap. The matcher
+  // chooses the earliest source position, then priority, length and index.
   for (let left = 0; left < entries.length; left += 1) {
     const a = entries[left]
     if (!a.enabled) continue
@@ -214,7 +215,7 @@ export function inspectGlossary(raw) {
         code: 'overlapping-terms',
         index: b.index,
         otherIndex: a.index,
-        message: 'Overlapping source terms use priority first, then longest-match order.',
+        message: 'Overlapping terms resolve from left to right; at the same position, priority wins before match length.',
       })
     }
   }
