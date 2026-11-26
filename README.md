@@ -282,6 +282,186 @@ Positive numeric settings are normalized to nonzero integers, and timer-based se
 | `maxConcurrency` | `3` | Provider attempts active across the whole service at once |
 | `maxQueuedRequests` | `24` | FIFO provider attempts waiting for a slot; `0` disables waiting |
 
+
+## Glossary CLI
+
+The package includes a dependency-free Node.js CLI for local validation and
+review. It uses the same glossary parser and matcher as the Host; it never
+contacts a translation provider.
+
+```bash
+# Validate a versioned glossary or legacy JSON array.
+npm run glossary -- validate path/to/glossary.json
+
+# Emit a machine-readable report suitable for CI.
+npm run glossary -- validate path/to/glossary.json --format json
+
+# Preview local term substitutions for a language pair.
+npm run glossary -- preview path/to/glossary.json \
+  --source-language en --target-language zh-Hans \
+  --text "DeepSeek API is available." --format json
+
+# Review changes between two glossary revisions.
+npm run glossary -- diff old-glossary.json new-glossary.json --format json
+
+# Explain every rule that applies to a source sample.
+npm run glossary -- explain path/to/glossary.json \
+  --source-language en --target-language zh-Hans \
+  --text "DeepSeek API" --format json
+
+# Audit term coverage against a representative source corpus.
+npm run glossary -- audit path/to/glossary.json \
+  --source-language en --target-language zh-Hans \
+  --text-file ./samples/source.txt --format json
+
+# Fail CI when any actionable sample finding is present.
+npm run glossary -- audit path/to/glossary.json \
+  --source-language en --target-language zh-Hans \
+  --text-file ./samples/source.txt --fail-on any --format json
+
+# Apply a reusable version 1 quality policy.
+npm run glossary -- audit path/to/glossary.json \
+  --source-language en --target-language zh-Hans \
+  --text-file ./samples/source.txt --policy ./config/glossary-policy.json --format json
+
+# Validate the policy file independently before wiring it into CI.
+npm run glossary -- policy validate ./config/glossary-policy.json --format json
+
+# Compare two quality policy revisions before changing CI thresholds.
+npm run glossary -- policy diff config/glossary-policy.json config/glossary-policy.next.json --format json
+
+# Generate a starter policy; choose strict, balanced or permissive.
+npm run glossary -- policy init --preset balanced --output ./config/glossary-policy.json
+
+# Generate a SARIF 2.1.0 report for GitHub Code Scanning.
+npm run glossary -- audit path/to/glossary.json \
+  --source-language en --target-language zh-Hans \
+  --text-file ./samples/source.txt --format sarif --output reports/glossary.sarif
+
+# Safely normalize a glossary into a new versioned file.
+npm run glossary -- fix path/to/glossary.json --output reports/glossary.fixed.json --format json
+
+# Read the glossary from stdin.
+cat path/to/glossary.json | npm run glossary -- validate -
+```
+
+`validate` exits with `0` when there are no errors (warnings remain
+non-fatal), `1` when the glossary is invalid, and `2` for command, option or
+file errors. JSON mode includes accepted-entry counts plus structured errors
+and warnings. `preview` reports only local glossary substitutions: unmatched
+source text remains unchanged and is not machine-translated. It makes zero
+provider requests. `diff` compares the normalized rules in two revisions and
+reports added, removed, changed and relatively reordered entries; adding a
+new entry does not make every following entry look reordered. Diff JSON
+includes validation diagnostics for both sides and per-field changes. One diff
+input may come from stdin. `explain` shows each rule's decision and matching
+occurrences, including overlap blockers and reasons for skipped rules such as
+disabled state, language-scope mismatch, case mismatch, word-boundary mismatch
+or no source occurrence. Match offsets are zero-based UTF-16 code units. The
+final preview is glossary-only; this command makes no provider requests. `audit`
+aggregates the same decisions over a supplied sample, reporting active, unused,
+fully shadowed, disabled, out-of-scope and pattern-mismatch rules plus the
+percentage of source code units replaced by winning local matches. Coverage describes only the supplied sample; it is not a corpus-wide guarantee.
+Use `--fail-on unused|shadowed|pattern-mismatch|out-of-scope|any` to make
+selected findings return exit code 1 for CI; the default `none` preserves a
+successful exit while still reporting findings. The JSON report includes the
+selected policy and its failure reasons. `--format sarif` emits SARIF 2.1.0;
+combine it with `--output` to save a report even when the selected gate fails.
+The repository also includes a reusable composite action at
+`.github/actions/glossary-audit`. It requires Node.js 22 or newer and accepts
+a glossary file, source sample, language pair, failure policy and SARIF path.
+Its outputs expose the report path, finding count, audit result, exit code and annotation count. It emits up to 50 GitHub workflow annotations and appends a coverage / finding summary to `GITHUB_STEP_SUMMARY` when available. Workflow-command message and path values are escaped before output. When `policy-base-ref` is set alongside `policy-file`, it reads the base revision of that policy from Git, compares it with the current file and adds a threshold-by-threshold table to the Job Summary. The added, removed, changed, tightened and relaxed counts are exposed as Action outputs; the Job Summary labels each threshold's impact. Set `policy-diff-fail-on: relaxed` to fail the Action when any threshold is loosened, `tightened` to block stricter changes, or `any` to require review of every threshold change; `none` is informational only. Separate outputs expose whether this gate passed, its exit code and the number of blocking changes. The checkout must include the base commit (use `fetch-depth: 0`).
+
+An optional `--policy` file adds threshold-based checks on top of `--fail-on`. The
+version 1 policy supports `minCoveragePercent`, `maxUnusedRules`,
+`maxShadowedOccurrences`, `maxPatternMismatchRules` and
+`maxOutOfScopeRules`. Every configured threshold is evaluated and included
+in the JSON / SARIF report; a failed threshold returns exit code 1. See
+`config/glossary-policy.example.json` for a starter file. Use `policy init --preset strict|balanced|permissive --output <file>` to generate a starter file; `balanced` is the default. It refuses to overwrite existing files. Use `policy diff <before> <after>` to review added, removed and changed thresholds plus Schema reference changes. Pass `-` for a policy file absent from one revision; this sentinel does not read stdin. An added policy is diffed against an empty policy (new thresholds tighten the gate), while a deleted policy is diffed against an empty current policy (removed thresholds relax the gate). The diff classifies each change as `tightened` or `relaxed`: adding a threshold tightens the gate, removing one relaxes it, increasing `minCoveragePercent` tightens it, and increasing a `max*` threshold relaxes it. Pass `--fail-on relaxed` to block threshold regressions, `--fail-on tightened` to block tightening changes, or `--fail-on any` to require explicit review for every threshold change; the default `none` reports without failing. A failing gate still emits the complete text / JSON diff and exits with code 1. Schema-reference changes are reported separately and do not count as threshold changes. Use `policy validate <file>` to check a policy on its own before running an audit; it does not require glossary or sample inputs. The sample includes a `$schema` reference to
+`config/glossary-policy.schema.json`, a JSON Schema 2020-12 document for editor
+completion and validation. The CLI accepts this metadata but evaluates only
+the supported threshold fields. The composite Action
+accepts the same file through its optional `policy-file` input.
+
+The `fix` command writes a new canonical versioned glossary file and never edits the source or overwrites an existing destination. It removes only duplicate entries that the runtime already ignores. Conflicting or invalid entries block output; overlapping terms are preserved and flagged for manual review.
+
+The action generates SARIF before enforcing the selected policy. Upload the
+report using GitHub's official uploader, even when the audit step fails, with
+`if: always()`:
+
+```yaml
+permissions:
+  contents: read
+  security-events: write
+
+steps:
+  - uses: actions/checkout@v7
+    with:
+      fetch-depth: 0
+  - uses: actions/setup-node@v7
+    with:
+      node-version: 22
+  - name: Audit glossary
+    id: glossary-audit
+    uses: ./.github/actions/glossary-audit
+    with:
+      glossary-file: ./config/glossary.json
+      source-file: ./samples/source.txt
+      source-language: en
+      target-language: zh-Hans
+      fail-on: any
+      policy-file: ./config/glossary-policy.json
+      policy-base-ref: ${{ github.event.pull_request.base.sha }}
+      policy-diff-fail-on: relaxed
+      sarif-file: ./reports/glossary-audit.sarif
+  - name: Upload glossary findings
+    if: always() && steps.glossary-audit.outputs.sarif-file != ''
+    uses: github/codeql-action/upload-sarif@v4
+    with:
+      sarif_file: ${{ steps.glossary-audit.outputs.sarif-file }}
+      category: dsh-glossary-audit
+```
+
+Uploading requires `security-events: write` and a repository where Code
+Scanning is available.
+
+### Standalone quality policy review Action
+
+When a workflow only needs to review policy changes, use the dedicated
+`.github/actions/glossary-policy-review` Action. Unlike the glossary-audit
+Action, it does not require a glossary or source sample and does not run an
+audit. It reads the baseline policy from the selected Git commit, emits the
+same tightened / relaxed threshold summary, and can gate changes independently.
+
+```yaml
+steps:
+  - uses: actions/checkout@v7
+    with:
+      fetch-depth: 0
+  - uses: actions/setup-node@v7
+    with:
+      node-version: 22
+  - name: Review glossary quality policy
+    id: policy-review
+    uses: ./.github/actions/glossary-policy-review
+    with:
+      policy-file: ./config/glossary-policy.json
+      policy-base-ref: ${{ github.event.pull_request.base.sha }}
+      fail-on: relaxed
+```
+
+The Action exposes added, removed, changed, tightened and relaxed counts,
+the resolved baseline commit, gate result, exit code and policy-file lifecycle.
+A newly added policy is compared against an empty policy (all introduced
+thresholds tighten the gate); a deleted policy is compared against an empty
+current policy (all removed thresholds relax the gate). If the policy is
+missing from both revisions, the Action fails instead of silently accepting
+a likely path/configuration mistake. The full change table
+is appended to `GITHUB_STEP_SUMMARY`, including when the selected gate fails.
+As with the glossary-audit Action, the base commit must be available in the
+checkout (`fetch-depth: 0`). See the [GitHub SARIF upload guide](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file).
+The installed package also exposes the `dsh-translation-glossary` executable.
+
 ## Install
 
 From the plugin market: search for **Translation Pane**, or add it by name:
