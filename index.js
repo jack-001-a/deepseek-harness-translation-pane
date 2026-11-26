@@ -581,7 +581,8 @@ class TokenBucket {
  */
 function positive(value, fallback) {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return fallback
-  return Math.floor(value)
+  const integer = Math.floor(value)
+  return integer >= 1 ? integer : fallback
 }
 
 /**
