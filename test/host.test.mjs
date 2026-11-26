@@ -1303,7 +1303,7 @@ test('Remote marker: the descriptor names both methods', () => {
   assert.ok(Object.isFrozen(marker.methods))
   assert.deepEqual(
     marker.methods.map((method) => method.method),
-    ['describe', 'translate'],
+    ['describe', 'translate', 'setGlossary'],
   )
   for (const method of marker.methods) {
     assert.equal(method.invocation.kind, 'direct')
