@@ -33,7 +33,9 @@ import { markdownSegments } from './src/host/markdown.js'
 import {
   countTranslationPlanFragments,
   createTranslationPlan,
+  inspectGlossary,
   normalizeGlossary,
+  parseGlossaryImport,
   renderTranslationPlans,
 } from './src/host/glossary.js'
 export { splitText }
@@ -288,6 +290,7 @@ export function resolveConfig(config) {
   const raw = config !== null && typeof config === 'object' ? config : {}
   const maxTextChars = positive(raw.maxTextChars, DEFAULT_MAX_TEXT_CHARS)
   const timeoutMs = positive(raw.timeoutMs, DEFAULT_TIMEOUT_MS)
+  const glossaryInspection = inspectGlossary(raw.glossary)
   return Object.freeze({
     bingEndpoint: endpoint(raw.bingEndpoint, DEFAULT_BING_ENDPOINT),
     googleEndpoint: endpoint(raw.googleEndpoint, DEFAULT_GOOGLE_ENDPOINT),
@@ -316,7 +319,8 @@ export function resolveConfig(config) {
     maxConcurrency: positive(raw.maxConcurrency, DEFAULT_MAX_CONCURRENCY),
     // Terms are bounded and frozen at service creation; matched source terms
     // are replaced locally and are never sent to the translation provider.
-    glossary: normalizeGlossary(raw.glossary),
+    glossary: glossaryInspection.entries,
+    glossaryWarnings: glossaryInspection.warnings,
     // The jitter source is injectable so the back-off is exactly testable.
     jitter: typeof raw.jitter === 'function' ? raw.jitter : Math.random,
   })
@@ -344,6 +348,10 @@ export class TranslationPaneService {
     this.health = new ProviderHealth(config.providerCooldownMs, DIRECT_PROVIDERS)
     this.cacheHits = 0
     this.cacheMisses = 0
+    /** Mutable glossary snapshot; edits are scoped to this Host lifetime. */
+    this.glossary = config.glossary
+    this.glossaryWarnings = config.glossaryWarnings
+    this.glossaryRevision = 0
     this.typertRemote = Object.freeze({
       service: this,
       serviceKey: SERVICE_KEY,
@@ -374,13 +382,64 @@ export class TranslationPaneService {
       cacheEntries: this.cache.size,
       cacheHits: this.cacheHits,
       cacheMisses: this.cacheMisses,
-      glossaryEntries: this.config.glossary.length,
+      glossaryEntries: this.glossary.length,
+      glossary: this.glossary.map((entry) => ({
+        source: entry.source,
+        target: entry.target,
+        sourceLanguage: entry.sourceLanguage,
+        targetLanguage: entry.targetLanguage,
+        matchCase: entry.matchCase,
+        wholeWord: entry.wholeWord,
+        enabled: entry.enabled,
+        priority: entry.priority,
+      })),
+      glossaryWarnings: this.glossaryWarnings,
       // Plain data, computed from what was observed so far; this call never
       // probes the network or awaits anything. The translator route owns its
       // own routing, so it reports no direct-provider health.
       providerHealth: route === 'direct' ? this.health.snapshot() : {},
       // Whether a failed provider is retried automatically on another one.
       failover: route === 'direct' && this.config.failover,
+    }
+  }
+
+  /**
+   * Import and activate a validated glossary JSON document for this Host session.
+   * The current in-flight requests are cancelled and cached results invalidated,
+   * so later translations cannot reuse outputs from the previous terminology.
+   * @param payload - versioned or legacy glossary JSON text.
+   * @returns active entries and any non-fatal overlap/duplicate warnings.
+   */
+  setGlossary(payload) {
+    const inspection = parseGlossaryImport(payload)
+    if (inspection.errors.length > 0) {
+      throw new TranslationPaneError(
+        CODE.invalidRequest,
+        'translationPane: the glossary import contains invalid entries',
+        { errors: inspection.errors },
+      )
+    }
+    this.glossary = inspection.entries
+    this.glossaryWarnings = inspection.warnings
+    this.glossaryRevision += 1
+    for (const entry of this.inflight.values()) {
+      entry.controller.abort(new Error('translationPane: the glossary changed during translation'))
+    }
+    this.cache = new TranslationCache(this.config.cacheSize)
+    return {
+      glossary: this.glossary.map((entry) => ({
+        source: entry.source,
+        target: entry.target,
+        sourceLanguage: entry.sourceLanguage,
+        targetLanguage: entry.targetLanguage,
+        matchCase: entry.matchCase,
+        wholeWord: entry.wholeWord,
+        enabled: entry.enabled,
+        priority: entry.priority,
+      })),
+      warnings: this.glossaryWarnings,
+      count: this.glossary.length,
+      revision: this.glossaryRevision,
     }
   }
 
@@ -448,7 +507,7 @@ export class TranslationPaneService {
       }
     }
 
-    const key = `${spec.format}|${spec.providerKey}|${spec.sourceLanguage}|${spec.targetLanguage}|${spec.text}`
+    const key = `${spec.glossaryRevision}|${spec.format}|${spec.providerKey}|${spec.sourceLanguage}|${spec.targetLanguage}|${spec.text}`
     const cached = this.cache.get(key)
     if (cached !== undefined) {
       this.cacheHits += 1
@@ -536,6 +595,8 @@ export class TranslationPaneService {
       // The cache key must name whatever decides the result, so an unnamed
       // provider is keyed apart from every named one.
       providerKey: route === 'direct' ? (requested ?? providers[0]) : (requested ?? 'default'),
+      glossary: this.glossary,
+      glossaryRevision: this.glossaryRevision,
     }
   }
 
@@ -661,8 +722,12 @@ export class TranslationPaneService {
     const deadline = this.deadline(controller.signal, this.config.timeoutMs)
     try {
       const fragmentSize = this.fragmentSize(translator)
+      const languages = {
+        sourceLanguage: spec.sourceLanguage,
+        targetLanguage: spec.targetLanguage,
+      }
       const makePlan = (source) =>
-        createTranslationPlan(source, this.config.glossary, fragmentSize)
+        createTranslationPlan(source, spec.glossary, fragmentSize, languages)
       const plans = spec.format === 'json'
         ? spec.jsonTokens.map((token) => makePlan(token.value))
         : spec.format === 'markdown'
@@ -1499,6 +1564,7 @@ Object.defineProperty(TranslationPaneService.prototype, REMOTE_METHODS, {
     methods: Object.freeze([
       Object.freeze({ method: 'describe', invocation: Object.freeze({ kind: 'direct' }) }),
       Object.freeze({ method: 'translate', invocation: Object.freeze({ kind: 'direct' }) }),
+      Object.freeze({ method: 'setGlossary', invocation: Object.freeze({ kind: 'direct' }) }),
     ]),
   }),
 })
