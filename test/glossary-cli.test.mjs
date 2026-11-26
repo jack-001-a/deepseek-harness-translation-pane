@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -413,6 +413,55 @@ test('audit can fail CI selectively while still emitting its JSON report', (t) =
   assert.match(invalid.stderr, /--fail-on must be one of/)
 })
 
+
+
+test('fix removes runtime-ignored duplicates but preserves overlapping rules for review', (t) => {
+  const source = fixture(t, JSON.stringify([
+    { source: 'API', target: '接口' },
+    { source: 'API', target: '接口' },
+    { source: 'API Gateway', target: 'API 网关' },
+  ]))
+  const output = join(tmpdir(), 'translation-pane-fixed-' + process.pid + '-' + Date.now() + '.json')
+  t.after(() => rmSync(output, { force: true }))
+  const result = runCli(['fix', source, '--output', output, '--format', 'json'])
+
+  assert.equal(result.status, 0, result.stderr)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.removedDuplicates, 1)
+  assert.equal(report.preservedOverlapWarnings, 1)
+  assert.equal(report.manualReviewRequired, true)
+  assert.equal(report.inputEntryCount, 3)
+  assert.equal(report.outputEntryCount, 2)
+  const exported = JSON.parse(readFileSync(output, 'utf8'))
+  assert.equal(exported.version, 1)
+  assert.equal(exported.glossary.length, 2)
+  assert.equal(exported.glossary[0].source, 'API')
+  assert.equal(exported.glossary[1].source, 'API Gateway')
+})
+
+test('fix blocks conflicting entries and never overwrites the source file', (t) => {
+  const conflict = fixture(t, '[{"source":"API","target":"接口"},{"source":"API","target":"应用程序接口"}]')
+  const blockedOutput = join(tmpdir(), 'translation-pane-blocked-' + process.pid + '-' + Date.now() + '.json')
+  t.after(() => rmSync(blockedOutput, { force: true }))
+  const blocked = runCli(['fix', conflict, '--output', blockedOutput, '--format', 'json'])
+  assert.equal(blocked.status, 1)
+  assert.equal(JSON.parse(blocked.stdout).written, false)
+  assert.equal(existsSync(blockedOutput), false)
+
+  const safe = fixture(t, '[{"source":"API","target":"接口"}]')
+  const overwrite = runCli(['fix', safe, '--output', safe])
+  assert.equal(overwrite.status, 2)
+  assert.match(overwrite.stderr, /must differ from the source/)
+})
+
+test('fix refuses to overwrite an existing destination', (t) => {
+  const source = fixture(t, '[{"source":"API","target":"接口"}]')
+  const existing = fixture(t, 'preserve me', 'existing.json')
+  const result = runCli(['fix', source, '--output', existing])
+  assert.equal(result.status, 2)
+  assert.match(result.stderr, /EEXIST/)
+  assert.equal(readFileSync(existing, 'utf8'), 'preserve me')
+})
 
 test('preview refuses malformed language tags and unknown commands with exit code 2', (t) => {
   const path = fixture(t, '[{"source":"API","target":"接口"}]')

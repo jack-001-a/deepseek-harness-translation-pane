@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 
 import { createGlossarySarifReport, writeGlossarySarif } from './glossary-sarif.mjs'
 
-import { glossarySegments, languageScopeMatches, parseGlossaryImport } from '../src/host/glossary.js'
+import { glossarySegments, languageScopeMatches, parseGlossaryImport, serializeGlossaryExport } from '../src/host/glossary.js'
 
 const USAGE = [
   'Usage:',
   '  dsh-translation-glossary validate [file|-] [--format text|json]',
+  '  dsh-translation-glossary fix <file> --output <new-file> [--format text|json]',
   '  dsh-translation-glossary preview [file|-] (--text <text> | --text-file <path>)',
   '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json|sarif] [--output <path>]',
   '  dsh-translation-glossary diff <before-file|-> <after-file|-> [--format text|json]',
@@ -788,6 +790,84 @@ function audit(args) {
   return ciPolicy.passed ? 0 : 1
 }
 
+
+function fixGlossary(args) {
+  const { positional, options } = parseOptions(args, new Set(['output', 'format']))
+  if (positional.length !== 1 || positional[0] === '-') {
+    throw new CliError('fix requires exactly one glossary file path; stdin is not supported.')
+  }
+  if (typeof options.output !== 'string' || options.output.length === 0 || options.output === '-') {
+    throw new CliError('fix requires --output <new-file>; the source glossary is never overwritten.')
+  }
+  const format = options.format ?? 'text'
+  if (!['text', 'json'].includes(format)) throw new CliError('--format must be "text" or "json".')
+  const sourcePath = resolve(positional[0])
+  const outputPath = resolve(options.output)
+  if (sourcePath === outputPath) {
+    throw new CliError('The output path must differ from the source glossary; in-place edits are not supported.')
+  }
+
+  const input = readTextFile(positional[0], 'glossary file')
+  const validation = parseGlossaryImport(input)
+  let inputEntryCount = null
+  try {
+    const parsed = JSON.parse(input)
+    inputEntryCount = Array.isArray(parsed)
+      ? parsed.length
+      : Array.isArray(parsed?.glossary)
+        ? parsed.glossary.length
+        : null
+  } catch {
+    // The validator below owns malformed JSON diagnostics.
+  }
+
+  const duplicateCount = validation.warnings.filter((item) => item.code === 'duplicate-entry').length
+  const overlapWarnings = validation.warnings.filter((item) => item.code === 'overlapping-terms')
+  const report = {
+    command: 'fix',
+    valid: validation.errors.length === 0,
+    sourceFile: positional[0],
+    outputFile: options.output,
+    inputEntryCount,
+    outputEntryCount: validation.entries.length,
+    removedDuplicates: duplicateCount,
+    preservedOverlapWarnings: overlapWarnings.length,
+    manualReviewRequired: overlapWarnings.length > 0,
+    errors: validation.errors,
+    warnings: validation.warnings,
+    written: false,
+  }
+
+  if (validation.errors.length > 0) {
+    if (format === 'json') writeJson(report)
+    else {
+      process.stdout.write('No output written: the glossary contains blocking errors.\n')
+      diagnosticLines(validation.errors, 'ERROR')
+      diagnosticLines(validation.warnings, 'WARN')
+    }
+    return 1
+  }
+
+  const serialized = serializeGlossaryExport(validation.entries) + '\n'
+  mkdirSync(dirname(outputPath), { recursive: true })
+  writeFileSync(outputPath, serialized, { encoding: 'utf8', flag: 'wx' })
+  report.written = true
+
+  if (format === 'json') {
+    writeJson(report)
+  } else {
+    process.stdout.write('Wrote safe glossary normalization to ' + options.output + '\n')
+    process.stdout.write('Entries: ' + inputEntryCount + ' -> ' + validation.entries.length + '\n')
+    process.stdout.write('Removed duplicate entries: ' + duplicateCount + '\n')
+    process.stdout.write('Overlapping rules preserved for review: ' + overlapWarnings.length + '\n')
+    if (overlapWarnings.length > 0) {
+      process.stdout.write('Manual review is still required for overlapping terms; no overlap rule was changed.\n')
+    }
+    diagnosticLines(overlapWarnings, 'WARN')
+  }
+  return 0
+}
+
 function main(argv) {
   if (argv.length === 0 || (argv.length === 1 && argv[0] === '--help')) {
     process.stdout.write(USAGE + '\n')
@@ -795,6 +875,7 @@ function main(argv) {
   }
   const [command, ...args] = argv
   try {
+    if (command === 'fix') return fixGlossary(args)
     if (command === 'validate') return validate(args)
     if (command === 'preview') return preview(args)
     if (command === 'diff') return diff(args)
