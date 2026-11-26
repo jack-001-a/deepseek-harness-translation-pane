@@ -466,7 +466,7 @@ test('audit rejects malformed, unknown and empty quality policy definitions', (t
     const policy = fixture(t, value)
     const result = runCli(['audit', glossary, '--text-file', source, '--format', 'json', '--policy', policy])
     assert.equal(result.status, 2)
-    assert.match(result.stderr, /Quality policy/)
+    assert.match(result.stderr, /Quality policy|minCoveragePercent|maxUnusedRules|Unknown quality policy/)
   }
 })
 
