@@ -131,8 +131,7 @@ export function markdownSegments(source) {
     }
   }
 
-  // Fence content is protected as one range, including the delimiters. An
-  // unclosed fence protects through EOF rather than translating code as prose.
+  // Treat fenced code as one opaque span, including its fence lines.
   let lineStart = 0
   while (lineStart < source.length) {
     const newline = source.indexOf('\n', lineStart)
@@ -148,14 +147,14 @@ export function markdownSegments(source) {
     const fenceChar = opening[1][0]
     const fenceLength = opening[1].length
     const fenceUnit = fenceChar === '\x60' ? '\\x60' : '~'
-    const closingPattern = new RegExp('^ {0,3}' + fenceUnit + '{' + fenceLength + ',}[ \\t]*$')
+    const closingPattern = new RegExp('^ {0,3}' + fenceUnit + '{' + fenceLength + ',}[ \t]*$')
     let cursor = newline < 0 ? source.length : newline + 1
     let fenceEnd = source.length
     while (cursor < source.length) {
-      const nextNewline = source.indexOf('\\n', cursor)
+      const nextNewline = source.indexOf('\n', cursor)
       const nextEnd = nextNewline < 0 ? source.length : nextNewline
       let candidate = source.slice(cursor, nextEnd)
-      if (candidate.endsWith('\\r')) candidate = candidate.slice(0, -1)
+      if (candidate.endsWith('\r')) candidate = candidate.slice(0, -1)
       if (closingPattern.test(candidate)) {
         fenceEnd = nextNewline < 0 ? nextEnd : nextNewline + 1
         break
@@ -167,17 +166,17 @@ export function markdownSegments(source) {
     lineStart = fenceEnd
   }
 
-  // Inline code, placeholders, HTML, links, URLs and entities are opaque.
-  addMatches(/(\\x60+)[^\\n]*?\\1/g)
-  addMatches(/\\{\\{[\\s\\S]*?\\}\\}/g)
-  addMatches(/\\$\\{[^}\\n]*\\}/g)
-  addMatches(/<\\/?[A-Za-z][^>\\n]*>/g)
-  addMatches(/<https?:\\/\\/[^>\\s]+>/gi)
-  addMatches(/https?:\\/\\/[^\\s<>()]+/gi)
-  addMatches(/&(?:#\\d+|#x[\\da-f]+|[a-z][\\w]+);/gi)
+  // Inline code, placeholders, HTML, URLs and entities are opaque.
+  addMatches(/(\x60+)[^\n]*?\1/g)
+  addMatches(/\{\{[\s\S]*?\}\}/g)
+  addMatches(/\$\{[^}\n]*\}/g)
+  addMatches(/<\/?[A-Za-z][^>\n]*>/g)
+  addMatches(/<https?:\/\/[^>\s]+>/gi)
+  addMatches(/https?:\/\/[^\s<>()]+/gi)
+  addMatches(/&(?:#\d+|#x[\da-f]+|[a-z][\w]+);/gi)
 
-  // Keep link labels translatable while freezing link punctuation and target.
-  const links = /(!?)\\[([^\\]\\n]*)\\]\\((?:<[^>\\n]*>|[^)\\n])*\\)/g
+  // Keep link labels translatable while freezing brackets and destinations.
+  const links = /(!?)\[([^\]\n]*)\]\((?:<[^>\n]*>|[^)\n])*\)/g
   for (const match of source.matchAll(links)) {
     const linkStart = match.index
     const linkEnd = linkStart + match[0].length
@@ -192,10 +191,10 @@ export function markdownSegments(source) {
   }
 
   // Protect common block prefixes and standalone thematic-break lines.
-  addMatches(/^ {0,3}(?:#{1,6}[ \\t]+|>[ \\t]?|(?:[-+*]|\\d+[.)])[ \\t]+)(?:\\[[ xX]\\][ \\t]+)?/gm)
-  addMatches(/^ {0,3}(?:(?:\\*|_|-)[ \\t]*){3,}[ \\t]*$/gm)
+  addMatches(/^ {0,3}(?:#{1,6}[ \t]+|>[ \t]?|(?:[-+*]|\d+[.)])[ \t]+)(?:\[[ xX]\][ \t]+)?/gm)
+  addMatches(/^ {0,3}(?:(?:\*|_|-)[ \t]*){3,}[ \t]*$/gm)
   // Formatting delimiters are protected separately from their prose.
-  addMatches(/\\*\\*|__|~~|(?<!\\w)\\*(?=\\S)|(?<=\\S)\\*(?!\\w)|(?<!\\w)_(?=\\S)|(?<=\\S)_(?!\\w)/g)
+  addMatches(/\*\*|__|~~|(?<!\w)\*(?=\S)|(?<=\S)\*(?!\w)|(?<!\w)_(?=\S)|(?<=\S)_(?!\w)/g)
 
   ranges.sort((a, b) => a.start - b.start || a.end - b.end)
   const merged = []
@@ -211,7 +210,7 @@ export function markdownSegments(source) {
   const segments = []
   const append = (text, translate) => {
     if (text.length === 0) return
-    const shouldTranslate = translate && /\\S/u.test(text)
+    const shouldTranslate = translate && /\S/u.test(text)
     const previous = segments.at(-1)
     if (previous && previous.translate === shouldTranslate) {
       previous.text += text
