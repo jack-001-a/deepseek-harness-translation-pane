@@ -85,6 +85,8 @@ window.__ModuleLoader__.load({
       'error.timeout': 'The translation service did not answer in time. Try again, or shorten the text.',
       'error.rateLimited':
         'Too many translation requests were sent too quickly. Wait a moment before trying again.',
+      'error.busy':
+        'The translation service is busy. Wait for a request to finish, or cancel an older request and try again.',
       'error.providerError':
         'The translation service failed to translate the text. Try again, or choose another service.',
       'error.invalidResponse':
@@ -159,6 +161,7 @@ window.__ModuleLoader__.load({
       'error.providerUnavailable': '当前选中的翻译服务不可用，请更换服务或稍后重试。',
       'error.timeout': '翻译服务响应超时，请重试或缩短文本。',
       'error.rateLimited': '翻译请求过于频繁，请稍候再试。',
+      'error.busy': '翻译服务当前繁忙，请等待已有请求完成，或取消较早的请求后重试。',
       'error.providerError': '翻译服务处理失败，请重试或更换服务。',
       'error.invalidResponse': '翻译服务返回了无法解析的内容，请重试。',
       'error.offline': 'Harness 无法连接到 Host，请确认 Host 正在运行后重试。',
@@ -223,6 +226,7 @@ window.__ModuleLoader__.load({
       'translation-pane/provider-unavailable': 'error.providerUnavailable',
       'translation-pane/timeout': 'error.timeout',
       'translation-pane/rate-limited': 'error.rateLimited',
+      'translation-pane/busy': 'error.busy',
       'translation-pane/provider-error': 'error.providerError',
       'translation-pane/invalid-response': 'error.invalidResponse',
       'translation-pane/offline': 'error.offline',
