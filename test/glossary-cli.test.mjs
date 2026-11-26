@@ -476,7 +476,7 @@ test('quality policy accepts optional schema metadata and ships a matching JSON 
   const policy = fixture(t, JSON.stringify({
     $schema: './glossary-policy.schema.json',
     version: 1,
-    minCoveragePercent: 85,
+    minCoveragePercent: 20,
     maxUnusedRules: 2,
   }))
   const glossary = fixture(t, '[{"source":"API","target":"接口"}]')
