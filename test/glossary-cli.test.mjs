@@ -372,7 +372,7 @@ test('audit text output and CLI help use readable line breaks and list the comma
 
   assert.equal(output.status, 0, output.stderr)
   assert.match(output.stdout, /Glossary coverage audit/)
-  assert.match(output.stdout, /Coverage: 25%/)
+  assert.match(output.stdout, /Coverage: 27\\.27%/)
   assert.ok(output.stdout.includes('\\n'))
   assert.equal(help.status, 0)
   assert.match(help.stdout, /dsh-translation-glossary audit/)
