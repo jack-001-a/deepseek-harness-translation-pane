@@ -225,6 +225,8 @@ test('config: the defaults are the documented ones', () => {
   assert.equal(config.cacheSize, 64)
   assert.equal(config.rateLimitPerMinute, 60)
   assert.equal(config.maxConcurrency, 3)
+  assert.deepEqual(config.glossary, [])
+  assert.deepEqual(config.glossaryWarnings, [])
 })
 
 test('config: sensible overrides are accepted and unusable values fall back', () => {
@@ -291,7 +293,9 @@ test('describe: it reports the routing facts the browser needs', () => {
     'cacheMisses',
     'failover',
     'fragmentChars',
+    'glossary',
     'glossaryEntries',
+    'glossaryWarnings',
     'languages',
     'maxRetries',
     'maxTextChars',
@@ -1983,4 +1987,71 @@ test('concurrency: a failed fragment prevents queued fragments from being dispat
   )
   assert.equal(calls.length, 2, 'only the already-active fragments may reach the provider')
   assert.deepEqual(calls, ['a'.repeat(50), 'b'.repeat(50)])
+})
+
+test('runtime glossary changes invalidate cached output and change future translations', async () => {
+  const h = translatedHarness({
+    glossary: [{ source: 'API', target: '接口' }],
+  })
+  const request = {
+    text: 'API is useful',
+    sourceLanguage: 'en',
+    targetLanguage: 'zh-Hans',
+  }
+  const first = await h.service.translateRequest(request)
+  assert.equal(first.text, '接口 IS USEFUL')
+  assert.equal(h.service.describe().cacheEntries, 1)
+
+  const updated = h.service.setGlossary(JSON.stringify({
+    version: 1,
+    glossary: [{ source: 'API', target: '应用程序接口' }],
+  }))
+  assert.equal(updated.count, 1)
+  assert.equal(updated.revision, 1)
+  assert.equal(h.service.describe().cacheEntries, 0)
+
+  const second = await h.service.translateRequest(request)
+  assert.equal(second.text, '应用程序接口 IS USEFUL')
+  assert.equal(h.requests.length, 2)
+})
+
+test('runtime glossary rejects conflicting imports without changing active terms', () => {
+  const h = translatedHarness({ glossary: [{ source: 'API', target: '接口' }] })
+  assert.throws(
+    () => h.service.setGlossary(JSON.stringify([
+      { source: 'API', target: '接口' },
+      { source: 'api', target: '程序接口' },
+    ])),
+    (error) => {
+      assert.equal(error.code, 'translation-pane/invalid-request')
+      assert.equal(error.isDSHRemoteError, true)
+      return true
+    },
+  )
+  assert.equal(h.service.describe().glossary[0].target, '接口')
+})
+
+test('Host applies language-scoped terms only to the matching language pair', async () => {
+  const h = translatedHarness({
+    glossary: [
+      { source: 'API', target: '接口', sourceLanguage: 'en', targetLanguage: 'zh-Hans' },
+      { source: 'API', target: 'API', sourceLanguage: 'en', targetLanguage: 'fr' },
+    ],
+  })
+  const chinese = await h.service.translateRequest({
+    text: 'API works',
+    sourceLanguage: 'en-US',
+    targetLanguage: 'zh-Hans',
+  })
+  assert.equal(chinese.text, '接口 WORKS')
+  assert.deepEqual(h.requests, [' works'])
+
+  h.requests.length = 0
+  const french = await h.service.translateRequest({
+    text: 'API works',
+    sourceLanguage: 'en',
+    targetLanguage: 'fr',
+  })
+  assert.equal(french.text, 'API WORKS')
+  assert.deepEqual(h.requests, ['API works'])
 })
