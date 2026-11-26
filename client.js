@@ -1546,7 +1546,7 @@ window.__ModuleLoader__.load({
               {
                 type: 'button',
                 className: 'dshTr-button',
-                disabled: !host.connected || glossaryBusy || !glossaryDraft.trim(),
+                disabled: !host.connected || glossaryBusy || pending || !glossaryDraft.trim(),
                 onClick: () => { void applyGlossary() },
               },
               glossaryBusy ? t('action.translating') : t('glossary.apply'),
