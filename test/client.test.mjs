@@ -912,7 +912,8 @@ test('the glossary editor imports JSON and applies it through the Host', async (
   await flushPanel()
 
   assert.equal(JSON.parse(submitted).glossary[0].sourceLanguage, 'en')
-  assert.equal(textOf(resultRegion).includes('old-glossary:'), false, 'a previous translation must be cleared after glossary activation')
+  const updatedRegion = findOne(mounted.tree, (node) => node.props?.role === 'region', 'the updated result region')
+  assert.equal(textOf(updatedRegion).includes('old-glossary:'), false, 'a previous translation must be cleared after glossary activation')
   assert.match(textOf(mounted.tree), /1 glossary warnings need review/)
   assert.match(textOf(mounted.tree), /Overlap/)
 })
