@@ -672,9 +672,13 @@ export class TranslationPaneService {
                 : [{ text: segment.text, translate: false, fragments: [] }],
             )
           : [makePlan(spec.text)]
+      const fragmentCount = countTranslationPlanFragments(plans)
       const fragments = plans.flatMap((plan) =>
         plan.flatMap((segment) => segment.fragments),
       )
+      if (fragments.length !== fragmentCount) {
+        throw new Error('translationPane: glossary fragment count is inconsistent')
+      }
       const results = fragments.length === 0
         ? []
         : await this.dispatch(fragments, spec, route, translator, deadline.signal)
