@@ -1,0 +1,116 @@
+name: DSH Glossary Audit
+description: Audit glossary use, emit SARIF 2.1.0, and optionally fail the workflow.
+inputs:
+  glossary-file:
+    description: Path to a versioned glossary JSON file or legacy JSON array.
+    required: true
+  source-file:
+    description: Path to the source text sample.
+    required: true
+  source-language:
+    description: Source language tag or auto.
+    required: false
+    default: auto
+  target-language:
+    description: Target language tag.
+    required: false
+    default: zh-Hans
+  fail-on:
+    description: CI policy: none, unused, shadowed, pattern-mismatch, out-of-scope, or any.
+    required: false
+    default: none
+  policy-file:
+    description: Optional version 1 JSON quality policy with coverage and finding thresholds.
+    required: false
+    default: ''
+  policy-base-ref:
+    description: Optional Git commit or ref to compare against the current policy file. Requires the base commit in the checkout.
+    required: false
+    default: ''
+  policy-diff-fail-on:
+    description: Fail the action when the policy diff contains relaxed, tightened, or any threshold changes. Requires policy-base-ref.
+    required: false
+    default: none
+  sarif-file:
+    description: SARIF output path relative to the workflow workspace.
+    required: false
+    default: glossary-audit.sarif
+outputs:
+  sarif-file:
+    description: Generated SARIF file path, if generation succeeded.
+    value: ${{ steps.audit.outputs.sarif-file }}
+  audit-passed:
+    description: Whether the selected audit policy passed.
+    value: ${{ steps.audit.outputs.audit-passed }}
+  exit-code:
+    description: Audit command exit code.
+    value: ${{ steps.audit.outputs.exit-code }}
+  finding-count:
+    description: Number of SARIF results produced.
+    value: ${{ steps.audit.outputs.finding-count }}
+  annotation-count:
+    description: Number of GitHub workflow annotations emitted.
+    value: ${{ steps.audit.outputs.annotation-count }}
+  policy-diff-count:
+    description: Number of added, removed or changed quality policy thresholds compared with policy-base-ref.
+    value: ${{ steps.audit.outputs.policy-diff-count }}
+  policy-diff-added-count:
+    description: Number of thresholds added compared with policy-base-ref.
+    value: ${{ steps.audit.outputs.policy-diff-added-count }}
+  policy-diff-removed-count:
+    description: Number of thresholds removed compared with policy-base-ref.
+    value: ${{ steps.audit.outputs.policy-diff-removed-count }}
+  policy-diff-changed-count:
+    description: Number of threshold values changed compared with policy-base-ref.
+    value: ${{ steps.audit.outputs.policy-diff-changed-count }}
+  policy-diff-tightened-count:
+    description: Number of quality thresholds tightened compared with policy-base-ref.
+    value: ${{ steps.audit.outputs.policy-diff-tightened-count }}
+  policy-diff-relaxed-count:
+    description: Number of quality thresholds relaxed compared with policy-base-ref.
+    value: ${{ steps.audit.outputs.policy-diff-relaxed-count }}
+  policy-diff-passed:
+    description: Whether the selected policy diff gate passed.
+    value: ${{ steps.audit.outputs.policy-diff-passed }}
+  policy-diff-exit-code:
+    description: Policy diff gate exit code.
+    value: ${{ steps.audit.outputs.policy-diff-exit-code }}
+  policy-diff-failure-count:
+    description: Number of threshold changes matched by policy-diff-fail-on.
+    value: ${{ steps.audit.outputs.policy-diff-failure-count }}
+  policy-schema-changed:
+    description: Whether the JSON Schema reference changed compared with policy-base-ref.
+    value: ${{ steps.audit.outputs.policy-schema-changed }}
+runs:
+  using: composite
+  steps:
+    - id: audit
+      name: Generate glossary SARIF
+      shell: bash
+      env:
+        ACTION_ROOT: ${{ github.action_path }}
+        INPUT_GLOSSARY_FILE: ${{ inputs.glossary-file }}
+        INPUT_SOURCE_FILE: ${{ inputs.source-file }}
+        INPUT_SOURCE_LANGUAGE: ${{ inputs.source-language }}
+        INPUT_TARGET_LANGUAGE: ${{ inputs.target-language }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_POLICY_FILE: ${{ inputs.policy-file }}
+        INPUT_POLICY_BASE_REF: ${{ inputs.policy-base-ref }}
+        INPUT_POLICY_DIFF_FAIL_ON: ${{ inputs.policy-diff-fail-on }}
+        INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
+      run: node "$ACTION_ROOT/../../../scripts/run-glossary-action.mjs"
+    - name: Enforce glossary audit policy
+      if: always()
+      shell: bash
+      env:
+        AUDIT_EXIT_CODE: ${{ steps.audit.outputs.exit-code }}
+        POLICY_DIFF_EXIT_CODE: ${{ steps.audit.outputs.policy-diff-exit-code }}
+      run: |
+        code="${AUDIT_EXIT_CODE:-2}"
+        diff_code="${POLICY_DIFF_EXIT_CODE:-2}"
+        if [ "$code" != "0" ]; then
+          exit "$code"
+        fi
+        if [ "$diff_code" != "0" ]; then
+          exit "$diff_code"
+        fi
