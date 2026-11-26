@@ -812,3 +812,31 @@ test('the Format selector sends JSON mode to the Host and explains its boundary'
   assert.equal(submitted.format, 'json')
   assert.equal(submitted.text, '{"message":"hello"}')
 })
+
+
+test('the Format selector sends Markdown mode to the Host and explains protected spans', async () => {
+  loadPluginState = await loadPlugin()
+  let submitted
+  const { mounted } = mountPanel({
+    translate: (args) => {
+      submitted = args
+      return { text: '# 你好', provider: 'bing', cached: false, durationMs: 1 }
+    },
+  })
+  await flushPanel()
+  const format = findOne(
+    mounted.tree,
+    (node) => node.type === 'select' && String(node.props?.id).endsWith('-format'),
+    'the Format selector',
+  )
+  format.props.onChange({ target: { value: 'markdown' } })
+  await flushPanel()
+  assert.match(textOf(mounted.tree), /Markdown mode translates prose while preserving code blocks/)
+  assert.match(textOf(mounted.tree), /Markdown \(preserve structure\)/)
+  await typeSource(mounted, '# Hello')
+  translateButton(mounted.tree).props.onClick()
+  await flushPanel()
+
+  assert.equal(submitted.format, 'markdown')
+  assert.equal(submitted.text, '# Hello')
+})
