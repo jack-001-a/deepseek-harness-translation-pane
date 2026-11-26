@@ -6,6 +6,15 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## Unreleased
 
+### Fixed
+
+- Require integer values for integer-valued configuration options, so fractional
+  values fall back to documented defaults instead of flooring to zero.
+- Reject provider endpoint URLs containing user information or fragments, in
+  line with the configuration contract.
+- Honor valid `Retry-After` delays independently of the local exponential
+  back-off ceiling, while keeping the whole-request deadline authoritative.
+
 ## [1.3.0] — 2026-11-21
 
 ### Added
