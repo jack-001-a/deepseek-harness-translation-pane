@@ -364,6 +364,9 @@ npm run glossary -- audit path/to/glossary.json \
   --source-language en --target-language zh-Hans \
   --text-file ./samples/source.txt --format sarif --output reports/glossary.sarif
 
+# Safely normalize a glossary into a new versioned file.
+npm run glossary -- fix path/to/glossary.json --output reports/glossary.fixed.json --format json
+
 # Read the glossary from stdin.
 cat path/to/glossary.json | npm run glossary -- validate -
 ```
@@ -393,7 +396,9 @@ combine it with `--output` to save a report even when the selected gate fails.
 The repository also includes a reusable composite action at
 `.github/actions/glossary-audit`. It requires Node.js 22 or newer and accepts
 a glossary file, source sample, language pair, failure policy and SARIF path.
-Its outputs expose the report path, finding count, audit result and exit code.
+Its outputs expose the report path, finding count, audit result, exit code and annotation count. It emits up to 50 GitHub workflow annotations and appends a coverage / finding summary to `GITHUB_STEP_SUMMARY` when available. Workflow-command message and path values are escaped before output.
+
+The `fix` command writes a new canonical versioned glossary file and never edits the source or overwrites an existing destination. It removes only duplicate entries that the runtime already ignores. Conflicting or invalid entries block output; overlapping terms are preserved and flagged for manual review.
 
 The action generates SARIF before enforcing the selected policy. Upload the
 report using GitHub's official uploader, even when the audit step fails, with

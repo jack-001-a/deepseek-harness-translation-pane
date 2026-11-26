@@ -36,6 +36,9 @@ outputs:
   finding-count:
     description: Number of SARIF results produced.
     value: ${{ steps.audit.outputs.finding-count }}
+  annotation-count:
+    description: Number of GitHub workflow annotations emitted.
+    value: ${{ steps.audit.outputs.annotation-count }}
 runs:
   using: composite
   steps:
