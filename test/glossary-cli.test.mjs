@@ -549,14 +549,14 @@ test('policy validate rejects invalid policy files and unknown subcommands', (t)
   const malformed = fixture(t, '{broken')
   const badThreshold = runCli(['policy', 'validate', invalid])
   const badJson = runCli(['policy', 'validate', malformed])
-  const unsupported = runCli(['policy', 'init', invalid])
+  const unsupported = runCli(['policy', 'remove', invalid])
 
   assert.equal(badThreshold.status, 2)
   assert.match(badThreshold.stderr, /minCoveragePercent/)
   assert.equal(badJson.status, 2)
   assert.match(badJson.stderr, /Quality policy must be valid JSON/)
   assert.equal(unsupported.status, 2)
-  assert.match(unsupported.stderr, /policy supports only the validate/)
+  assert.match(unsupported.stderr, /policy supports the validate and init/)
 })
 
 
