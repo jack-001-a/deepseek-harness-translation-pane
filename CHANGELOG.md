@@ -6,6 +6,12 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## Unreleased
 
+### Changed
+
+- Extract the Host cache, provider-health and token-bucket primitives into a
+  dependency-free internal module, with focused unit tests and explicit npm
+  package inclusion. Runtime behavior and public APIs remain unchanged.
+
 ## [1.3.0] — 2026-11-21
 
 ### Added
