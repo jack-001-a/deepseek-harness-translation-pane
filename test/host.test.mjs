@@ -223,6 +223,7 @@ test('config: the defaults are the documented ones', () => {
   assert.equal(config.retryMaxMs, 4000)
   assert.equal(config.maxResponseBytes, 1024 * 1024)
   assert.equal(config.cacheSize, 64)
+  assert.equal(config.cacheMaxBytes, 8 * 1024 * 1024)
   assert.equal(config.rateLimitPerMinute, 60)
   assert.equal(config.maxConcurrency, 3)
 })
@@ -239,6 +240,7 @@ test('config: sensible overrides are accepted and unusable values fall back', ()
     fragmentChars: 100,
     maxRetries: 0,
     cacheSize: 0,
+    cacheMaxBytes: 2048,
     rateLimitPerMinute: 5,
     maxConcurrency: 7,
     maxResponseBytes: 2048,
@@ -253,6 +255,7 @@ test('config: sensible overrides are accepted and unusable values fall back', ()
   assert.equal(config.fragmentChars, 100)
   assert.equal(config.maxRetries, 0)
   assert.equal(config.cacheSize, 0)
+  assert.equal(config.cacheMaxBytes, 2048)
   assert.equal(config.rateLimitPerMinute, 5)
   assert.equal(config.maxConcurrency, 7)
   assert.equal(config.maxResponseBytes, 2048)
@@ -266,6 +269,7 @@ test('config: sensible overrides are accepted and unusable values fall back', ()
     maxTextChars: 'many',
     maxRetries: -3,
     rateLimitPerMinute: 0,
+    cacheMaxBytes: -1,
   })
   assert.equal(broken.bingEndpoint, 'https://edge.microsoft.com/translate/translatetext')
   assert.equal(broken.timeoutMs, 20000)
@@ -275,6 +279,7 @@ test('config: sensible overrides are accepted and unusable values fall back', ()
   assert.equal(broken.maxTextChars, 20000)
   assert.equal(broken.maxRetries, 2)
   assert.equal(broken.rateLimitPerMinute, 60)
+  assert.equal(broken.cacheMaxBytes, 8 * 1024 * 1024)
 
   // One attempt can never outlive the whole request.
   assert.equal(resolveConfig({ timeoutMs: 800, attemptTimeoutMs: 5000 }).attemptTimeoutMs, 800)
@@ -776,6 +781,44 @@ test('cache: the cache is bounded', async (t) => {
   await h.service.translate({ text: 'two', targetLanguage: 'en' })
   await h.service.translate({ text: 'three', targetLanguage: 'en' })
   assert.equal(h.service.describe().cacheEntries, 2)
+})
+
+test('cache: retained entries obey the UTF-8 byte budget as well as the entry limit', async (t) => {
+  let calls = 0
+  mockFetch(async (_url, init) => {
+    calls += 1
+    return jsonResponse(bingPayload(JSON.parse(init.body)[0]))
+  }, t)
+
+  const h = harness({ config: { cacheSize: 10, cacheMaxBytes: 1100 } })
+  const first = 'a'.repeat(200)
+  const second = 'b'.repeat(200)
+
+  await h.service.translate({ text: first, targetLanguage: 'en' })
+  assert.ok(h.service.cache.bytes <= 1100)
+
+  await h.service.translate({ text: second, targetLanguage: 'en' })
+  assert.equal(h.service.cache.size, 1, 'the older entry should be evicted to stay within the byte budget')
+  assert.ok(h.service.cache.bytes <= 1100)
+
+  await h.service.translate({ text: first, targetLanguage: 'en' })
+  assert.equal(calls, 3, 'the evicted translation must be fetched again')
+  assert.ok(h.service.cache.bytes <= 1100)
+})
+
+test('cache: a single entry larger than the byte budget is never retained', async (t) => {
+  let calls = 0
+  mockFetch(async (_url, init) => {
+    calls += 1
+    return jsonResponse(bingPayload(JSON.parse(init.body)[0]))
+  }, t)
+
+  const h = harness({ config: { cacheMaxBytes: 1024 } })
+  await h.service.translate({ text: 'large'.repeat(500), targetLanguage: 'en' })
+
+  assert.equal(calls, 1, 'the translation still succeeds')
+  assert.equal(h.service.cache.size, 0, 'an oversized result must not be retained')
+  assert.equal(h.service.cache.bytes, 0)
 })
 
 test('coalescing: identical concurrent demands share one provider call', async (t) => {
