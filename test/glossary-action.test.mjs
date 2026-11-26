@@ -122,7 +122,7 @@ test('composite action runner summarizes policy changes from the selected Git ba
   assert.match(jobSummary, /70/)
   assert.match(jobSummary, /maxShadowedOccurrences/)
   assert.match(jobSummary, /tightened, 1 relaxed/)
-  assert.match(jobSummary, /Impact \\| Change/)
+  assert.match(jobSummary, /Impact \| Change/)
   assert.match(jobSummary, /JSON Schema reference/)
   assert.match(jobSummary, /informational/)
 })

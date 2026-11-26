@@ -258,7 +258,7 @@ if (policyBaseRef) {
           tick + ' → ' + tick + display(policyDiff.schemaAfter) + tick)
       }
       lines.push('', 'This comparison is informational; threshold changes do not fail the audit by themselves.', '')
-      appendFileSync(summaryFile, lines.join('\\n'), 'utf8')
+      appendFileSync(summaryFile, lines.join('\n'), 'utf8')
     }
   } finally {
     rmSync(tempDirectory, { recursive: true, force: true })
