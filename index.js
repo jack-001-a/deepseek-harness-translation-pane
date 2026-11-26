@@ -328,9 +328,12 @@ function jsonStringValueTokens(source) {
  * @param maxChars - provider fragment limit.
  * @returns a safe local boundary.
  */
+// Reuse the ICU segmenter across fragment boundaries. Its iterator stops
+// at the first boundary that crosses the proposed cut.
+const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+
 function adjustGraphemeBoundary(text, boundary, maxChars) {
-  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
-  for (const item of segmenter.segment(text)) {
+  for (const item of GRAPHEME_SEGMENTER.segment(text)) {
     const start = item.index
     const end = start + item.segment.length
     if (start < boundary && end > boundary) {
