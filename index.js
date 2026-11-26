@@ -34,7 +34,6 @@ import {
   countTranslationPlanFragments,
   createTranslationPlan,
   inspectGlossary,
-  normalizeGlossary,
   parseGlossaryImport,
   renderTranslationPlans,
 } from './src/host/glossary.js'
