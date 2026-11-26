@@ -519,7 +519,6 @@ export function resolveConfig(config) {
   const maxTextChars = positive(raw.maxTextChars, DEFAULT_MAX_TEXT_CHARS)
   const timeoutMs = positive(raw.timeoutMs, DEFAULT_TIMEOUT_MS)
   const glossaryInspection = inspectGlossary(raw.glossary)
-  const glossaryInspection = inspectGlossary(raw.glossary)
   return Object.freeze({
     bingEndpoint: endpoint(raw.bingEndpoint, DEFAULT_BING_ENDPOINT),
     googleEndpoint: endpoint(raw.googleEndpoint, DEFAULT_GOOGLE_ENDPOINT),
