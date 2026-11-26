@@ -20,7 +20,7 @@ function required(name) {
 
 function output(name, value, outputFile) {
   const text = String(value)
-  if (/[\\r\\n]/u.test(text)) {
+  if (text.includes(String.fromCharCode(10)) || text.includes(String.fromCharCode(13))) {
     throw new Error('Action output contains a newline: ' + name)
   }
   appendFileSync(outputFile, name + '=' + text + '\n', 'utf8')
