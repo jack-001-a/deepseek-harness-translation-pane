@@ -118,6 +118,8 @@ window.__ModuleLoader__.load({
       'glossary.applied': 'Applied {count} glossary terms to this Host session.',
       'glossary.exported': 'Glossary JSON copied to the clipboard.',
       'glossary.invalidFile': 'Could not read this glossary file.',
+      'glossary.warning.invalid-entry': 'An invalid glossary entry was skipped.',
+      'glossary.warning.too-many-entries': 'The glossary exceeds the maximum of 128 entries.',
       'glossary.warning.duplicate-entry': 'Duplicate source term; the first entry is retained.',
       'glossary.warning.conflicting-entry': 'A source term has conflicting translations; resolve the duplicate before importing.',
       'glossary.warning.overlapping-terms': 'Overlapping terms detected. Priority wins first, then the longest match.',
@@ -200,6 +202,8 @@ window.__ModuleLoader__.load({
       'glossary.applied': '已在当前 Host 会话应用 {count} 条术语。',
       'glossary.exported': '术语表 JSON 已复制到剪贴板。',
       'glossary.invalidFile': '无法读取术语表文件。',
+      'glossary.warning.invalid-entry': '已跳过无效术语条目。',
+      'glossary.warning.too-many-entries': '术语表超过 128 条上限。',
       'glossary.warning.duplicate-entry': '发现重复原文术语，保留第一条。',
       'glossary.warning.conflicting-entry': '同一原文术语存在不同译法，请先解决冲突。',
       'glossary.warning.overlapping-terms': '发现术语重叠；将先按优先级、再按最长匹配处理。',
@@ -905,8 +909,11 @@ window.__ModuleLoader__.load({
        */
       const importGlossaryFile = React.useCallback(async (event) => {
         const file = event.target.files?.[0]
+        if (!file) {
+          event.target.value = ''
+          return
+        }
         event.target.value = ''
-        if (!file) return
         if (file.size > 256 * 1024 || typeof file.text !== 'function') {
           setGlossaryMessage(t('glossary.invalidFile'))
           return
