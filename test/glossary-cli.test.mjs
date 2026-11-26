@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -84,6 +84,20 @@ test('preview performs local replacements, honors boundaries and never calls a p
   assert.deepEqual(report.localReplacements, ['深度求索接口', '接口'])
   assert.ok(report.segments.some((segment) => segment.kind === 'unmatched-source' && segment.text.includes('APIs')))
   assert.match(report.note, /no machine translation/i)
+})
+
+test('preview can read source text from stdin with --text-file -', (t) => {
+  const path = fixture(t, '[{"source":"API","target":"接口","sourceLanguage":"en","targetLanguage":"zh-Hans"}]')
+  const result = runCli([
+    'preview', path,
+    '--source-language', 'en',
+    '--target-language', 'zh-Hans',
+    '--text-file', '-',
+    '--format', 'json',
+  ], 'API gateway')
+
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(JSON.parse(result.stdout).previewText, '接口 gateway')
 })
 
 test('preview respects language scopes and leaves non-matching terms unchanged', (t) => {
