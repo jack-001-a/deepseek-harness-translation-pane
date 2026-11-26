@@ -48,5 +48,9 @@
         cacheSize: 64
         # Token bucket: provider requests allowed per minute across all callers.
         rateLimitPerMinute: 60
-        # Fragments of one long request dispatched at the same time.
+        # Provider attempts active across the whole service at the same time.
+        # The same FIFO budget is shared by direct providers and the shipped translator.
         maxConcurrency: 3
+        # FIFO provider attempts waiting for a slot. Set to 0 to reject instead
+        # of queueing when every concurrency slot is occupied.
+        maxQueuedRequests: 24
