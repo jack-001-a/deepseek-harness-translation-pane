@@ -397,11 +397,27 @@ export function splitText(text, maxChars) {
  * @param value - the raw header value.
  * @returns the delay in milliseconds, or `undefined` when absent or unusable.
  */
+const HTTP_DATE_PATTERN =
+  /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \\d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \\d{4} \\d{2}:\\d{2}:\\d{2} GMT|(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday), \\d{2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\\d{2} \\d{2}:\\d{2}:\\d{2} GMT|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (?: [1-9]|[12]\\d|3[01]) \\d{2}:\\d{2}:\\d{2} \\d{4})$/
+
 function parseRetryAfter(value) {
-  if (typeof value !== 'string' || value.trim().length === 0) return undefined
-  const seconds = Number(value.trim())
-  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000)
-  const when = Date.parse(value.trim())
+  if (typeof value !== 'string') return undefined
+  const trimmed = value.trim()
+  if (trimmed.length === 0) return undefined
+
+  // RFC delay-seconds is one or more decimal digits, not JavaScript's wider
+  // Number() grammar (which also accepts signs, fractions and exponent/hex
+  // notation). Keep large valid values finite; backoff() applies our cap.
+  if (/^\\d+$/.test(trimmed)) {
+    const seconds = Number(trimmed)
+    return Number.isFinite(seconds) ? seconds * 1000 : Number.MAX_VALUE
+  }
+
+  // Date.parse() accepts non-HTTP strings such as "-1" and "1.5" as historic
+  // dates in some runtimes. Gate it behind the three HTTP-date wire formats
+  // before asking the runtime to validate the actual calendar date.
+  if (!HTTP_DATE_PATTERN.test(trimmed)) return undefined
+  const when = Date.parse(trimmed)
   if (Number.isNaN(when)) return undefined
   return Math.max(0, when - Date.now())
 }
