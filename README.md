@@ -345,8 +345,8 @@ npm run glossary -- preview path/to/glossary.json \
 npm run glossary -- diff old-glossary.json new-glossary.json --format json
 
 # Explain every rule that applies to a source sample.
-npm run glossary -- explain path/to/glossary.json \\
-  --source-language en --target-language zh-Hans \\
+npm run glossary -- explain path/to/glossary.json \
+  --source-language en --target-language zh-Hans \
   --text "DeepSeek API" --format json
 
 # Read the glossary from stdin.

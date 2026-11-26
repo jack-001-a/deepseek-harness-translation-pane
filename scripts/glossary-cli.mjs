@@ -348,20 +348,8 @@ function diff(args) {
 
 
 function literalPositions(source, term) {
-  const escaped = term.replace(/[.*+?^\${}()|[\]\\]/g, '\\function literalPositions(source, term) {
-  const foldedSource = source.toLowerCase()
-  const foldedTerm = term.toLowerCase()
-  const positions = []
-  let cursor = 0
-  while (cursor <= foldedSource.length - foldedTerm.length) {
-    const index = foldedSource.indexOf(foldedTerm, cursor)
-    if (index === -1) break
-    positions.push(index)
-    cursor = index + Math.max(1, foldedTerm.length)
-  }
-  return positions
-}')
-  return [...source.matchAll(new RegExp(escaped, 'giu'))].map((match) => match.index)
+  const escaped = Array.from(term, (character) => ".*+?^${}()|[]\\".includes(character) ? "\\" + character : character).join("")
+  return [...source.matchAll(new RegExp(escaped, "giu"))].map((match) => match.index)
 }
 
 function explainMatches(sourceText, entries, languages) {
