@@ -434,9 +434,15 @@ function makeHttpDateTimestamp(weekdayName, dayText, monthName, year, hourText, 
     second < 0 || second > 59
   ) return undefined
 
-  const timestamp = Date.UTC(year, month, day, hour, minute, second)
-  const date = new Date(timestamp)
+  // Date.UTC() treats years 0..99 as 1900..1999. HTTP-date carries
+  // an explicit four-digit year, so construct the UTC value without that
+  // legacy offset (including for years before 0100).
+  const date = new Date(0)
+  date.setUTCFullYear(year, month, day)
+  date.setUTCHours(hour, minute, second, 0)
+  const timestamp = date.getTime()
   if (
+    !Number.isFinite(timestamp) ||
     date.getUTCFullYear() !== year ||
     date.getUTCMonth() !== month ||
     date.getUTCDate() !== day ||
