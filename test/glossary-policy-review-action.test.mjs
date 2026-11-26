@@ -84,6 +84,7 @@ test('standalone policy review action reports threshold impact and passes a tigh
   assert.match(summary, /90/)
   assert.match(summary, /tightened/)
   assert.match(summary, /JSON Schema reference/)
+  assert.ok(summary.split(String.fromCharCode(10)).includes('| Threshold | Base value | Current value | Impact | Change |'))
 })
 
 test('standalone policy review action fails relaxed changes but still writes outputs and summary', (t) => {
@@ -107,6 +108,7 @@ test('standalone policy review action fails relaxed changes but still writes out
   assert.match(summary, /Review gate:\*\* FAIL/)
   assert.match(summary, /selected policy review gate failed/)
   assert.match(summary, /Current value/)
+  assert.ok(summary.split(String.fromCharCode(10)).includes('| Threshold | Base value | Current value | Impact | Change |'))
 })
 
 test('standalone policy review action rejects invalid modes and policy paths outside the checkout', (t) => {

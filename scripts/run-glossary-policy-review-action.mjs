@@ -12,7 +12,7 @@ function required(name) {
   if (typeof value !== 'string' || value.length === 0) {
     throw new Error('Missing required action environment value: ' + name)
   }
-  if (/[\\r\\n]/u.test(value)) {
+  if (value.includes(String.fromCharCode(10)) || value.includes(String.fromCharCode(13))) {
     throw new Error('Action inputs must not contain newline characters: ' + name)
   }
   return value
@@ -28,7 +28,8 @@ function output(name, value, outputFile) {
 
 function markdownEscape(value) {
   return String(value ?? '')
-    .replace(/[\\r\\n]+/gu, ' ')
+    .replaceAll(String.fromCharCode(13), ' ')
+    .replaceAll(String.fromCharCode(10), ' ')
     .replaceAll('|', '\\|')
     .replaceAll(String.fromCharCode(96), '\\' + String.fromCharCode(96))
 }
@@ -37,7 +38,7 @@ const githubOutput = required('GITHUB_OUTPUT')
 const policyFile = required('INPUT_POLICY_FILE')
 const baseRef = required('INPUT_POLICY_BASE_REF')
 const failOn = process.env.INPUT_FAIL_ON || 'none'
-if (/[\\r\\n]/u.test(failOn)) {
+if (failOn.includes(String.fromCharCode(10)) || failOn.includes(String.fromCharCode(13))) {
   throw new Error('Action inputs must not contain newline characters: INPUT_FAIL_ON')
 }
 if (!['none', 'relaxed', 'tightened', 'any'].includes(failOn)) {
