@@ -22,9 +22,9 @@
  * requests are coalesced and cached, so the anonymous endpoints are neither
  * hammered nor asked for the same paragraph twice.
  *
- * The bundle deliberately has no package dependencies — an installed package
- * resolves its imports from its own directory — so every import would have to
- * be a Node built-in. Only `node:buffer` is needed.
+ * The bundle has no third-party package dependencies. Its only Node built-in
+ * import is `node:buffer`; small internal Host primitives live in packaged
+ * relative modules under `src/host`.
  */
 import { Buffer } from 'node:buffer'
 import { ProviderHealth, TokenBucket, TranslationCache } from './src/host/runtime-state.js'
