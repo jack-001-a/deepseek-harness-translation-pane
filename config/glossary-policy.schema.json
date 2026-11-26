@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/jack-001-a/deepseek-harness-translation-pane/main/config/glossary-policy.schema.json",
+  "title": "DSH Translation Glossary Quality Policy",
+  "description": "Version 1 threshold policy for the dsh-translation-glossary audit command.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "description": "Optional URI reference to this JSON Schema."
+    },
+    "version": {
+      "const": 1,
+      "description": "Quality policy format version."
+    },
+    "minCoveragePercent": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Minimum percentage of source code units replaced by winning glossary matches."
+    },
+    "maxUnusedRules": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000,
+      "description": "Maximum number of enabled glossary rules absent from the supplied sample."
+    },
+    "maxShadowedOccurrences": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000,
+      "description": "Maximum number of occurrences shadowed by overlapping glossary matches."
+    },
+    "maxPatternMismatchRules": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000,
+      "description": "Maximum number of rules rejected by case or whole-word matching."
+    },
+    "maxOutOfScopeRules": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 1000000,
+      "description": "Maximum number of rules outside the selected source / target language pair."
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "anyOf": [
+    {
+      "required": [
+        "minCoveragePercent"
+      ]
+    },
+    {
+      "required": [
+        "maxUnusedRules"
+      ]
+    },
+    {
+      "required": [
+        "maxShadowedOccurrences"
+      ]
+    },
+    {
+      "required": [
+        "maxPatternMismatchRules"
+      ]
+    },
+    {
+      "required": [
+        "maxOutOfScopeRules"
+      ]
+    }
+  ]
+}
