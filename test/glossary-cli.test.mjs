@@ -372,11 +372,11 @@ test('audit text output and CLI help use readable line breaks and list the comma
 
   assert.equal(output.status, 0, output.stderr)
   assert.match(output.stdout, /Glossary coverage audit/)
-  assert.match(output.stdout, /Coverage: 27\\.27%/)
-  assert.ok(output.stdout.includes('\\n'))
+  assert.ok(output.stdout.includes('Coverage: 27.27%'))
+  assert.ok(output.stdout.includes(String.fromCharCode(10)))
   assert.equal(help.status, 0)
   assert.match(help.stdout, /dsh-translation-glossary audit/)
-  assert.doesNotMatch(help.stdout, /\\\\n/)
+  assert.equal(help.stdout.includes(String.fromCharCode(92) + 'n'), false)
 })
 
 
