@@ -503,7 +503,7 @@ test('quality policy accepts optional schema metadata and ships a matching JSON 
 test('quality policy rejects malformed schema metadata', (t) => {
   const glossary = fixture(t, '[{"source":"API","target":"接口"}]')
   const source = fixture(t, 'API')
-  for (const schemaValue of ['', 42, 'x'.repeat(513), 'invalid\\u0000schema']) {
+  for (const schemaValue of ['', 42, 'x'.repeat(513), 'invalid' + String.fromCharCode(0) + 'schema']) {
     const policy = fixture(t, JSON.stringify({
       $schema: schemaValue,
       version: 1,
