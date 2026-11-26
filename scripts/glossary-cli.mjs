@@ -16,7 +16,7 @@ const USAGE = [
   '',
   'Use "-" or omit the glossary file to read glossary JSON from stdin.',
   'Exit codes: 0 valid/success, 1 invalid glossary, 2 usage or file error.',
-].join('\\n')
+].join('\n')
 
 class CliError extends Error {}
 
@@ -608,7 +608,7 @@ function audit(args) {
     }
     if (format === 'json') writeJson(report)
     else {
-      process.stdout.write('Glossary is invalid; audit was not generated.\\n')
+      process.stdout.write('Glossary is invalid; audit was not generated.\n')
       diagnosticLines(validation.errors, 'ERROR')
       diagnosticLines(validation.warnings, 'WARN')
     }
@@ -707,11 +707,11 @@ function audit(args) {
   if (format === 'json') {
     writeJson(report)
   } else {
-    process.stdout.write('Glossary coverage audit (no provider calls)\\n')
-    process.stdout.write('Language pair: ' + sourceLanguage + ' -> ' + targetLanguage + '\\n')
+    process.stdout.write('Glossary coverage audit (no provider calls)\n')
+    process.stdout.write('Language pair: ' + sourceLanguage + ' -> ' + targetLanguage + '\n')
     process.stdout.write(
       'Coverage: ' + summary.coveragePercent + '% (' + matchedSourceCodeUnits +
-      '/' + sourceCodeUnits + ' source code units)\\n',
+      '/' + sourceCodeUnits + ' source code units)\n',
     )
     process.stdout.write(
       'Rules: ' + summary.totalRules +
@@ -720,13 +720,13 @@ function audit(args) {
       '; unused: ' + summary.unusedRules +
       '; out of scope: ' + summary.outOfScopeRules +
       '; disabled: ' + summary.disabledRules +
-      '; pattern mismatch: ' + summary.patternMismatchRules + '\\n',
+      '; pattern mismatch: ' + summary.patternMismatchRules + '\n',
     )
     for (const rule of ruleReports) {
       process.stdout.write(
         '[' + rule.entryNumber + '] ' + rule.source + ' -> ' + rule.target +
         ': ' + rule.status + ' (' + rule.appliedOccurrences + '/' + rule.occurrences +
-        ' applied)' + (rule.reason ? ' [' + rule.reason + ']' : '') + '\\n',
+        ' applied)' + (rule.reason ? ' [' + rule.reason + ']' : '') + '\n',
       )
     }
     diagnosticLines(validation.warnings, 'WARN')

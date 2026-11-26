@@ -365,6 +365,21 @@ test('audit reads sample text from stdin but never permits both inputs to consum
 })
 
 
+test('audit text output and CLI help use readable line breaks and list the command', (t) => {
+  const path = fixture(t, '[{"source":"API","target":"接口"}]')
+  const output = runCli(['audit', path, '--text', 'API gateway'])
+  const help = runCli(['--help'])
+
+  assert.equal(output.status, 0, output.stderr)
+  assert.match(output.stdout, /Glossary coverage audit/)
+  assert.match(output.stdout, /Coverage: 25%/)
+  assert.ok(output.stdout.includes('\\n'))
+  assert.equal(help.status, 0)
+  assert.match(help.stdout, /dsh-translation-glossary audit/)
+  assert.doesNotMatch(help.stdout, /\\\\n/)
+})
+
+
 test('preview refuses malformed language tags and unknown commands with exit code 2', (t) => {
   const path = fixture(t, '[{"source":"API","target":"接口"}]')
   const badLanguage = runCli(['preview', path, '--text', 'API', '--source-language', 'en&to=xx'])
