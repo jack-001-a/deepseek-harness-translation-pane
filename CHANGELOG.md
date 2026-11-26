@@ -6,6 +6,26 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## Unreleased
 
+### Fixed
+
+- Require integer values for integer-valued configuration options, so fractional
+  values fall back to documented defaults instead of flooring to zero.
+- Reject provider endpoint URLs containing user information or fragments, in
+  line with the configuration contract.
+- Honor valid `Retry-After` delays independently of the local exponential
+  back-off ceiling, while keeping the whole-request deadline authoritative.
+
+### Changed
+
+- Extract the Host cache, provider-health and token-bucket primitives into a
+  dependency-free internal module, with focused unit tests and explicit npm
+  package inclusion. Runtime behavior and public APIs remain unchanged.
+
+- Move Markdown-aware text splitting and JSON string-value token scanning into
+  a dependency-free Host text-processing module, retaining the existing
+  `splitText` entrypoint export.
+
+
 ### Changed
 
 - Extract the Host cache, provider-health and token-bucket primitives into a
