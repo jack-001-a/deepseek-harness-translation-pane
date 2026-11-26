@@ -44,7 +44,9 @@ window.__ModuleLoader__.load({
       'field.format': 'Format',
       'format.text': 'Plain text',
       'format.json': 'JSON values only',
+      'format.markdown': 'Markdown (preserve structure)',
       'note.json': 'JSON mode preserves keys, nesting, whitespace, and non-string values. Only string values are sent to the translation provider.',
+      'note.markdown': 'Markdown mode translates prose while preserving code blocks, inline code, URLs, link destinations, placeholders, HTML tags, entities, and common Markdown syntax.',
       'label.source': 'Source text',
       'label.result': 'Translation',
       'placeholder.source': 'Type or paste the text to translate.',
@@ -122,7 +124,9 @@ window.__ModuleLoader__.load({
       'field.format': '内容格式',
       'format.text': '普通文本',
       'format.json': '仅翻译 JSON 字符串值',
+      'format.markdown': 'Markdown（保留文档结构）',
       'note.json': 'JSON 模式会保留键名、层级、空白格式及非字符串值，只会将字符串值发送给翻译服务。',
+      'note.markdown': 'Markdown 模式只翻译自然语言文本，保留代码块、行内代码、URL、链接目标、模板变量、HTML 标签、实体和常见 Markdown 语法。',
       'label.source': '原文',
       'label.result': '译文',
       'placeholder.source': '输入或粘贴要翻译的文本。',
@@ -658,7 +662,10 @@ window.__ModuleLoader__.load({
         const saved = readPreferences().provider
         return PROVIDER_CATALOG.some((entry) => entry.id === saved) ? saved : 'bing'
       })
-      const [format, setFormat] = React.useState(() => readPreferences().format === 'json' ? 'json' : 'text')
+      const [format, setFormat] = React.useState(() => {
+        const saved = readPreferences().format
+        return saved === 'json' || saved === 'markdown' ? saved : 'text'
+      })
       const [source, setSource] = React.useState('')
       const [output, setOutput] = React.useState('')
       const [pending, setPending] = React.useState(false)
@@ -1171,6 +1178,7 @@ window.__ModuleLoader__.load({
             options: [
               { id: 'text', label: t('format.text') },
               { id: 'json', label: t('format.json') },
+              { id: 'markdown', label: t('format.markdown') },
             ],
             disabled: pending,
             onChange: setFormat,
@@ -1179,7 +1187,9 @@ window.__ModuleLoader__.load({
         ),
         format === 'json'
           ? h('p', { className: 'dshTr-note', role: 'note' }, t('note.json'))
-          : null,
+          : format === 'markdown'
+            ? h('p', { className: 'dshTr-note', role: 'note' }, t('note.markdown'))
+            : null,
         notice === null
           ? null
           : h('p', { className: 'dshTr-notice', role: 'status' }, notice),
