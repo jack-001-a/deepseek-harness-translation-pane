@@ -497,7 +497,9 @@ function parseRetryAfter(value) {
   // notation). Keep large valid values finite; backoff() applies our cap.
   if (/^\d+$/.test(trimmed)) {
     const seconds = Number(trimmed)
-    return Number.isFinite(seconds) ? seconds * 1000 : Number.MAX_VALUE
+    if (!Number.isFinite(seconds)) return Number.MAX_VALUE
+    const milliseconds = seconds * 1000
+    return Number.isFinite(milliseconds) ? milliseconds : Number.MAX_VALUE
   }
 
   const when = parseHttpDate(trimmed)
