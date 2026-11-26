@@ -207,7 +207,7 @@ export function inspectGlossary(raw) {
       if (!b.enabled) continue
       if (a.sourceLanguage !== b.sourceLanguage || a.targetLanguage !== b.targetLanguage) continue
       const aSource = a.matchCase ? a.source : a.source.toLowerCase()
-      const bSource = a.matchCase ? b.source : b.source.toLowerCase()
+      const bSource = b.matchCase ? b.source : b.source.toLowerCase()
       const overlaps = aSource.includes(bSource) || bSource.includes(aSource)
       if (!overlaps) continue
       warnings.push({
