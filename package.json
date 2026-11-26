@@ -28,7 +28,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "check": "node --check index.js && node --check client.js && node --check src/host/runtime-state.js && node --check scripts/run-harness-compatibility.mjs",
+    "check": "node --check index.js && node --check client.js && node --check src/host/runtime-state.js && node --check src/host/text.js && node --check scripts/run-harness-compatibility.mjs",
     "test": "node --test"
   },
   "exports": {
@@ -46,7 +46,8 @@
     "README.md",
     "CHANGELOG.md",
     "LICENSE",
-    "src/host/runtime-state.js"
+    "src/host/runtime-state.js",
+    "src/host/text.js"
   ],
   "publishConfig": {
     "access": "public"
