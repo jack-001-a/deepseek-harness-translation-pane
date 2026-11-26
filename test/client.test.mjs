@@ -145,6 +145,9 @@ const HOST_DESCRIBE = {
   cacheEntries: 0,
   cacheHits: 0,
   cacheMisses: 0,
+  glossaryEntries: 0,
+  glossary: [],
+  glossaryWarnings: [],
   providerHealth: {
     bing: { unreachable: false },
     google: { unreachable: false },
@@ -188,6 +191,17 @@ function applyPlugin(plugin, locale, options = {}) {
               if (value !== null && typeof value === 'object' && typeof value.ok === 'boolean') {
                 return value
               }
+              return { ok: true, value }
+            })
+          }
+          if (endpoint === 'translationPane/setGlossary') {
+            const action = options.setGlossary ?? ((args) => {
+              const parsed = JSON.parse(args.payload)
+              const glossary = Array.isArray(parsed) ? parsed : parsed.glossary
+              return { glossary, warnings: [], count: glossary.length, revision: 1 }
+            })
+            return Promise.resolve(action(payload?.args)).then((value) => {
+              if (value !== null && typeof value === 'object' && typeof value.ok === 'boolean') return value
               return { ok: true, value }
             })
           }
@@ -840,3 +854,82 @@ test('the Format selector sends Markdown mode to the Host and explains protected
   assert.equal(submitted.format, 'markdown')
   assert.equal(submitted.text, '# Hello')
 })
+
+
+test('the glossary editor imports JSON and applies it through the Host', async () => {
+  loadPluginState = await loadPlugin()
+  let submitted
+  const { mounted } = mountPanel({
+    setGlossary: (args) => {
+      submitted = args.payload
+      const parsed = JSON.parse(args.payload)
+      return {
+        glossary: parsed.glossary,
+        warnings: [{ code: 'overlapping-terms', message: 'overlap' }],
+        count: parsed.glossary.length,
+        revision: 1,
+      }
+    },
+  })
+  await flushPanel()
+
+  const editor = findOne(
+    mounted.tree,
+    (node) => node.type === 'textarea' && String(node.props?.className).includes('dshTr-glossaryArea'),
+    'the glossary JSON editor',
+  )
+  const portable = {
+    version: 1,
+    glossary: [{
+      source: 'API',
+      target: '接口',
+      sourceLanguage: 'en',
+      targetLanguage: 'zh-Hans',
+      wholeWord: true,
+      priority: 5,
+    }],
+  }
+  editor.props.onChange({ target: { value: JSON.stringify(portable, null, 2) } })
+  await flushPanel()
+
+  const apply = findOne(
+    mounted.tree,
+    (node) => node.type === 'button' && textOf(node) === 'Apply glossary',
+    'the Apply glossary action',
+  )
+  apply.props.onClick()
+  await flushPanel()
+
+  assert.equal(JSON.parse(submitted).glossary[0].sourceLanguage, 'en')
+  assert.match(textOf(mounted.tree), /1 glossary warnings need review/)
+  assert.match(textOf(mounted.tree), /Overlap/)
+})
+
+test('the glossary editor can load a JSON file into its draft', async () => {
+  loadPluginState = await loadPlugin()
+  const { mounted } = mountPanel()
+  await flushPanel()
+  const fileInput = findOne(
+    mounted.tree,
+    (node) => node.type === 'input' && node.props?.type === 'file',
+    'the glossary JSON file input',
+  )
+  fileInput.props.onChange({
+    target: {
+      files: [{
+        size: 100,
+        text: async () => JSON.stringify({ version: 1, glossary: [{ source: 'API', target: '接口' }] }),
+      }],
+      value: 'glossary.json',
+    },
+  })
+  await flushPanel()
+
+  const editor = findOne(
+    mounted.tree,
+    (node) => node.type === 'textarea' && String(node.props?.className).includes('dshTr-glossaryArea'),
+    'the glossary JSON editor',
+  )
+  assert.deepEqual(JSON.parse(editor.props.value).glossary, [{ source: 'API', target: '接口' }])
+})
+
