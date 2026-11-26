@@ -134,7 +134,7 @@ test('standalone policy review action treats a newly added policy as tightening'
   assert.match(outputs, /policy-diff-passed=true/)
 
   const summary = readFileSync(fixture.summary, 'utf8')
-  assert.match(summary, /Policy file: added/)
+  assert.ok(summary.includes('- **Policy file:** added'))
   assert.match(summary, /2 tightened, 0 relaxed/)
 })
 
@@ -152,7 +152,7 @@ test('standalone policy review action treats a deleted policy as relaxation and 
   assert.match(outputs, /policy-diff-passed=false/)
 
   const summary = readFileSync(fixture.summary, 'utf8')
-  assert.match(summary, /Policy file: deleted/)
+  assert.ok(summary.includes('- **Policy file:** deleted'))
   assert.match(summary, /2 tightened, 2 relaxed/)
   assert.match(summary, /selected policy review gate failed/)
 })
