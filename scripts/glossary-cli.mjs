@@ -7,6 +7,7 @@ const USAGE = [
   'Usage:',
   '  dsh-translation-glossary validate [file|-] [--format text|json]',
   '  dsh-translation-glossary preview [file|-] (--text <text> | --text-file <path>)',
+  '  dsh-translation-glossary diff <before-file|-> <after-file|-> [--format text|json]',
   '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json]',
   '',
   'Use "-" or omit the glossary file to read glossary JSON from stdin.',
@@ -53,8 +54,9 @@ function writeJson(value) {
 
 function diagnosticLines(diagnostics, label) {
   for (const item of diagnostics) {
+    const side = item.side ? item.side + ' ' : ''
     const location = Number.isInteger(item.index) ? 'entry ' + (item.index + 1) + ': ' : ''
-    process.stdout.write(label + ' [' + item.code + '] ' + location + item.message + '\n')
+    process.stdout.write(label + ' [' + item.code + '] ' + side + location + item.message + '\n')
   }
 }
 
@@ -161,6 +163,187 @@ function preview(args) {
   return 0
 }
 
+
+function glossaryIdentity(entry) {
+  const source = entry.matchCase ? entry.source : entry.source.toLowerCase()
+  return JSON.stringify([entry.sourceLanguage, entry.targetLanguage, entry.matchCase, source])
+}
+
+function glossaryRecord(entry) {
+  return {
+    source: entry.source,
+    target: entry.target,
+    sourceLanguage: entry.sourceLanguage,
+    targetLanguage: entry.targetLanguage,
+    matchCase: entry.matchCase,
+    wholeWord: entry.wholeWord,
+    enabled: entry.enabled,
+    priority: entry.priority,
+    index: entry.index,
+  }
+}
+
+function compareGlossaryEntries(beforeEntries, afterEntries) {
+  const before = new Map(beforeEntries.map((entry) => [glossaryIdentity(entry), entry]))
+  const after = new Map(afterEntries.map((entry) => [glossaryIdentity(entry), entry]))
+  const added = []
+  const removed = []
+  const changed = []
+  const changedKeys = new Set()
+
+  for (const [key, entry] of after) {
+    const previous = before.get(key)
+    if (!previous) {
+      added.push(glossaryRecord(entry))
+      continue
+    }
+    const fields = ['source', 'target', 'wholeWord', 'enabled', 'priority']
+    const differences = fields.filter((field) => previous[field] !== entry[field])
+    if (differences.length > 0) {
+      changedKeys.add(key)
+      changed.push({
+        source: entry.source,
+        fields: differences,
+        before: glossaryRecord(previous),
+        after: glossaryRecord(entry),
+      })
+    }
+  }
+
+  for (const [key, entry] of before) {
+    if (!after.has(key)) removed.push(glossaryRecord(entry))
+  }
+
+  const beforeCommon = beforeEntries
+    .filter((entry) => after.has(glossaryIdentity(entry)))
+    .map(glossaryIdentity)
+  const afterCommon = afterEntries
+    .filter((entry) => before.has(glossaryIdentity(entry)))
+    .map(glossaryIdentity)
+  const beforeRank = new Map(beforeCommon.map((key, index) => [key, index]))
+  const reordered = []
+  const reorderedKeys = new Set()
+  for (let index = 0; index < afterCommon.length; index += 1) {
+    const key = afterCommon[index]
+    const oldRank = beforeRank.get(key)
+    if (oldRank === index) continue
+    const previous = before.get(key)
+    const current = after.get(key)
+    reorderedKeys.add(key)
+    reordered.push({
+      source: current.source,
+      beforeIndex: previous.index,
+      afterIndex: current.index,
+      beforePosition: oldRank + 1,
+      afterPosition: index + 1,
+    })
+  }
+
+  const affected = new Set([...changedKeys, ...reorderedKeys])
+  const unchangedCount = Math.max(0, beforeCommon.length - affected.size)
+  const sortByIndex = (left, right) => left.index - right.index
+  added.sort(sortByIndex)
+  removed.sort(sortByIndex)
+  changed.sort((left, right) => left.after.index - right.after.index)
+  reordered.sort((left, right) => left.afterIndex - right.afterIndex)
+
+  return {
+    summary: {
+      added: added.length,
+      removed: removed.length,
+      changed: changed.length,
+      reordered: reordered.length,
+      unchanged: unchangedCount,
+    },
+    added,
+    removed,
+    changed,
+    reordered,
+  }
+}
+
+function diff(args) {
+  const { positional, options } = parseOptions(args, new Set(['format']))
+  if (positional.length !== 2) {
+    throw new CliError('diff requires exactly two glossary files: <before-file> <after-file>.')
+  }
+  if (positional[0] === '-' && positional[1] === '-') {
+    throw new CliError('Only one diff input may use stdin ("-").')
+  }
+  const format = options.format ?? 'text'
+  if (!['text', 'json'].includes(format)) throw new CliError('--format must be "text" or "json".')
+
+  const beforeInput = readTextFile(positional[0], 'before glossary file')
+  const afterInput = readTextFile(positional[1], 'after glossary file')
+  const beforeValidation = parseGlossaryImport(beforeInput)
+  const afterValidation = parseGlossaryImport(afterInput)
+  const errors = [
+    ...beforeValidation.errors.map((item) => ({ ...item, side: 'before' })),
+    ...afterValidation.errors.map((item) => ({ ...item, side: 'after' })),
+  ]
+  const warnings = [
+    ...beforeValidation.warnings.map((item) => ({ ...item, side: 'before' })),
+    ...afterValidation.warnings.map((item) => ({ ...item, side: 'after' })),
+  ]
+
+  if (errors.length > 0) {
+    const report = {
+      command: 'diff',
+      valid: false,
+      beforeFile: positional[0],
+      afterFile: positional[1],
+      errors,
+      warnings,
+    }
+    if (format === 'json') writeJson(report)
+    else {
+      process.stdout.write('Glossary diff was not generated because an input is invalid.\n')
+      diagnosticLines(errors, 'ERROR')
+      diagnosticLines(warnings, 'WARN')
+    }
+    return 1
+  }
+
+  const beforeEntries = [...beforeValidation.entries].sort((left, right) => left.index - right.index)
+  const afterEntries = [...afterValidation.entries].sort((left, right) => left.index - right.index)
+  const comparison = compareGlossaryEntries(beforeEntries, afterEntries)
+  const report = {
+    command: 'diff',
+    valid: true,
+    beforeFile: positional[0],
+    afterFile: positional[1],
+    ...comparison,
+    warnings,
+  }
+
+  if (format === 'json') {
+    writeJson(report)
+  } else {
+    const { added, removed, changed, reordered, unchanged } = report.summary
+    const hasChanges = added + removed + changed + reordered > 0
+    process.stdout.write('Glossary diff: ' + (hasChanges ? 'changes found' : 'no changes') + '\n')
+    process.stdout.write(
+      'Added: ' + added + '; removed: ' + removed + '; changed: ' + changed +
+      '; reordered: ' + reordered + '; unchanged: ' + unchanged + '\n',
+    )
+    for (const entry of report.added) {
+      process.stdout.write('+ ' + entry.source + ' -> ' + entry.target + '\n')
+    }
+    for (const entry of report.removed) {
+      process.stdout.write('- ' + entry.source + ' -> ' + entry.target + '\n')
+    }
+    for (const entry of report.changed) {
+      process.stdout.write('~ ' + entry.source + ' [' + entry.fields.join(', ') + ']\n')
+    }
+    for (const entry of report.reordered) {
+      process.stdout.write('↕ ' + entry.source + ' (position ' +
+        entry.beforePosition + ' -> ' + entry.afterPosition + ')\n')
+    }
+    diagnosticLines(report.warnings, 'WARN')
+  }
+  return 0
+}
+
 function main(argv) {
   if (argv.length === 0 || (argv.length === 1 && argv[0] === '--help')) {
     process.stdout.write(USAGE + '\n')
@@ -170,6 +353,7 @@ function main(argv) {
   try {
     if (command === 'validate') return validate(args)
     if (command === 'preview') return preview(args)
+    if (command === 'diff') return diff(args)
     throw new CliError('Unknown command: ' + command)
   } catch (error) {
     process.stderr.write('Error: ' + (error instanceof Error ? error.message : String(error)) + '\n')

@@ -341,6 +341,9 @@ npm run glossary -- preview path/to/glossary.json \
   --source-language en --target-language zh-Hans \
   --text "DeepSeek API is available." --format json
 
+# Review changes between two glossary revisions.
+npm run glossary -- diff old-glossary.json new-glossary.json --format json
+
 # Read the glossary from stdin.
 cat path/to/glossary.json | npm run glossary -- validate -
 ```
@@ -350,7 +353,11 @@ non-fatal), `1` when the glossary is invalid, and `2` for command, option or
 file errors. JSON mode includes accepted-entry counts plus structured errors
 and warnings. `preview` reports only local glossary substitutions: unmatched
 source text remains unchanged and is not machine-translated. It makes zero
-provider requests. The installed package also exposes the
+provider requests. `diff` compares the normalized rules in two revisions and
+reports added, removed, changed and relatively reordered entries; adding a
+new entry does not make every following entry look reordered. Diff JSON
+includes validation diagnostics for both sides and per-field changes. One diff
+input may come from stdin. The installed package also exposes the
 `dsh-translation-glossary` executable.
 
 

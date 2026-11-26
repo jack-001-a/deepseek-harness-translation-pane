@@ -118,6 +118,93 @@ test('preview respects language scopes and leaves non-matching terms unchanged',
   assert.equal(report.localReplacementCount, 0)
 })
 
+test('diff reports added, removed and modified entries with structured fields', (t) => {
+  const before = fixture(t, JSON.stringify([
+    { source: 'API', target: '接口' },
+    { source: 'DeepSeek', target: '深度求索' },
+    { source: 'OpenAI', target: '开放人工智能' },
+  ]))
+  const after = fixture(t, JSON.stringify({
+    version: 1,
+    glossary: [
+      { source: 'API', target: '应用程序接口', priority: 20, enabled: false },
+      { source: 'DeepSeek', target: '深度求索', wholeWord: true },
+      { source: 'Gemini', target: '双子座' },
+    ],
+  }))
+  const result = runCli(['diff', before, after, '--format', 'json'])
+
+  assert.equal(result.status, 0, result.stderr)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.valid, true)
+  assert.deepEqual(report.summary, {
+    added: 1, removed: 1, changed: 2, reordered: 0, unchanged: 0,
+  })
+  assert.equal(report.added[0].source, 'Gemini')
+  assert.equal(report.removed[0].source, 'OpenAI')
+  assert.deepEqual(report.changed.find((entry) => entry.source === 'API').fields, [
+    'target', 'enabled', 'priority',
+  ])
+  assert.deepEqual(report.changed.find((entry) => entry.source === 'DeepSeek').fields, [
+    'wholeWord',
+  ])
+})
+
+test('diff is stable across legacy arrays and versioned JSON exports', (t) => {
+  const before = fixture(t, '[{"source":"API","target":"接口"}]')
+  const after = fixture(t, '{"version":1,"glossary":[{"source":"API","target":"接口"}]}')
+  const result = runCli(['diff', before, after, '--format=json'])
+
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(JSON.parse(result.stdout).summary, {
+    added: 0, removed: 0, changed: 0, reordered: 0, unchanged: 1,
+  })
+})
+
+test('diff reports relative rule reordering without treating insertion as a reorder', (t) => {
+  const before = fixture(t, JSON.stringify([
+    { source: 'Alpha', target: '甲' },
+    { source: 'Beta', target: '乙' },
+    { source: 'Gamma', target: '丙' },
+  ]))
+  const after = fixture(t, JSON.stringify([
+    { source: 'New', target: '新' },
+    { source: 'Beta', target: '乙' },
+    { source: 'Alpha', target: '甲' },
+    { source: 'Gamma', target: '丙' },
+  ]))
+  const result = runCli(['diff', before, after, '--format', 'json'])
+
+  assert.equal(result.status, 0, result.stderr)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.summary.added, 1)
+  assert.equal(report.summary.reordered, 2)
+  assert.deepEqual(report.reordered.map((entry) => entry.source), ['Beta', 'Alpha'])
+  assert.equal(report.summary.unchanged, 1)
+})
+
+test('diff reports validation failures against the correct input and exits 1', (t) => {
+  const before = fixture(t, '[{"source":"API","target":"接口"}]')
+  const after = fixture(t, '[{"source":"API","target":"接口"},{"source":"API","target":"应用程序接口"}]')
+  const result = runCli(['diff', before, after, '--format', 'json'])
+
+  assert.equal(result.status, 1)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.valid, false)
+  assert.ok(report.errors.some((item) => item.side === 'after' && item.code === 'conflicting-entry'))
+})
+
+test('diff supports one stdin input and rejects two stdin inputs', (t) => {
+  const before = fixture(t, '[{"source":"API","target":"接口"}]')
+  const valid = runCli(['diff', before, '-', '--format', 'json'], '[{"source":"API","target":"接口"}]')
+  const invalid = runCli(['diff', '-', '-', '--format', 'json'], '[]')
+
+  assert.equal(valid.status, 0, valid.stderr)
+  assert.equal(JSON.parse(valid.stdout).summary.unchanged, 1)
+  assert.equal(invalid.status, 2)
+  assert.match(invalid.stderr, /Only one diff input/)
+})
+
 test('preview refuses malformed language tags and unknown commands with exit code 2', (t) => {
   const path = fixture(t, '[{"source":"API","target":"接口"}]')
   const badLanguage = runCli(['preview', path, '--text', 'API', '--source-language', 'en&to=xx'])
