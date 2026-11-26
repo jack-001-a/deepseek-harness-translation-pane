@@ -45,7 +45,8 @@
     "icon.svg",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "src/host/runtime-state.js"
   ],
   "publishConfig": {
     "access": "public"
