@@ -2550,6 +2550,98 @@ test('JSON mode leaves documents without string values unchanged and makes no pr
   assert.equal(calls, 0)
 })
 
+
+test('Markdown mode sends only prose to the provider and restores protected syntax', async (t) => {
+  const bodies = []
+  mockFetch(async (_url, init) => {
+    const fragment = JSON.parse(init.body)[0]
+    bodies.push(fragment)
+    return jsonResponse(bingPayload(fragment.toUpperCase()))
+  }, t)
+  const h = harness({ config: { fragmentChars: 100 } })
+  const tick = String.fromCharCode(96)
+  const fence = tick.repeat(3)
+  const source = [
+    '# Welcome **reader**',
+    '',
+    '- Read ' + tick + 'const value = 1' + tick + ' and [the guide](https://example.test/docs).',
+    '- Keep {{account.name}} and ' + '$' + '{runtime.value} unchanged.',
+    '',
+    fence + 'js',
+    'const secret = "do not translate";',
+    fence,
+    'Use <kbd>Ctrl</kbd> and https://example.test/path.',
+  ].join('\n')
+  const result = await h.service.translate({
+    text: source,
+    targetLanguage: 'zh-Hans',
+    format: 'markdown',
+  })
+
+  const submitted = bodies.join('')
+  assert.ok(bodies.length > 0)
+  for (const token of [
+    'const value = 1',
+    'https://example.test/docs',
+    '{{account.name}}',
+    '$' + '{runtime.value}',
+    'const secret = "do not translate";',
+    '<kbd>',
+    '</kbd>',
+    'https://example.test/path',
+  ]) {
+    assert.equal(submitted.includes(token), false, token + ' must not reach the provider')
+    assert.ok(result.text.includes(token), token + ' must be restored unchanged')
+  }
+  assert.ok(result.text.includes(fence + 'js\nconst secret = "do not translate";\n' + fence))
+  assert.ok(result.text.startsWith('# WELCOME **READER**'))
+  assert.ok(result.text.includes('[THE GUIDE](https://example.test/docs)'))
+  assert.equal(result.provider, 'bing')
+})
+
+test('Markdown code-only documents do not make provider requests', async (t) => {
+  let calls = 0
+  mockFetch(async () => {
+    calls += 1
+    return jsonResponse(bingPayload('unexpected'))
+  }, t)
+  const h = harness()
+  const tick = String.fromCharCode(96)
+  const fence = tick.repeat(3)
+  const source = fence + 'json\n{"secret":"value"}\n' + fence + '\n' + tick + 'const x = 1' + tick
+  const result = await h.service.translate({
+    text: source,
+    targetLanguage: 'zh-Hans',
+    format: 'markdown',
+  })
+  assert.equal(result.text, source)
+  assert.equal(result.provider, 'none')
+  assert.equal(calls, 0)
+})
+
+test('translate_text agent tool exposes and forwards Markdown format', async (t) => {
+  const submitted = []
+  mockFetch(async (_url, init) => {
+    const fragment = JSON.parse(init.body)[0]
+    submitted.push(fragment)
+    return jsonResponse(bingPayload('T:' + fragment))
+  }, t)
+  const h = harness()
+  const tool = h.tools.find((entry) => entry.name === 'translate_text')
+  assert.deepEqual(tool.parameters.properties.format.enum, ['text', 'json', 'markdown'])
+  const tick = String.fromCharCode(96)
+  const fence = tick.repeat(3)
+  const source = ['# Hello', '', fence + 'js', 'const value = 1', fence].join('\n')
+  const result = await tool.execute(
+    { text: source, targetLanguage: 'zh-Hans', format: 'markdown' },
+    { signal: new AbortController().signal },
+  )
+  assert.ok(submitted.length > 0)
+  assert.equal(submitted.join(''), 'Hello\n\n')
+  assert.ok(result.text.startsWith('# T:Hello'))
+  assert.ok(result.text.includes(fence + 'js\nconst value = 1\n' + fence))
+})
+
 test('format is part of the cache key and defaults to text', async (t) => {
   const bodies = []
   mockFetch(async (_url, init) => {
@@ -2573,7 +2665,7 @@ test('translate_text agent tool exposes and forwards JSON format', async (t) => 
   const h = harness()
   const tool = h.tools.find((entry) => entry.name === 'translate_text')
 
-  assert.deepEqual(tool.parameters.properties.format.enum, ['text', 'json'])
+  assert.deepEqual(tool.parameters.properties.format.enum, ['text', 'json', 'markdown'])
   const result = await tool.execute(
     { text: '{"message":"hello"}', targetLanguage: 'zh-Hans', format: 'json' },
     { signal: new AbortController().signal },
