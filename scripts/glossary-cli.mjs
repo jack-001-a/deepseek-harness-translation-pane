@@ -110,7 +110,6 @@ function preview(args) {
   }
   const format = options.format ?? 'text'
   if (!['text', 'json'].includes(format)) throw new CliError('--format must be "text" or "json".')
-  const qualityPolicy = options.policy ? loadQualityPolicy(options.policy) : null
   const sourceLanguage = options['source-language'] ?? 'auto'
   const targetLanguage = options['target-language'] ?? 'zh-Hans'
   const languagePattern = /^(?:auto|[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)$/u
@@ -663,6 +662,7 @@ function audit(args) {
     throw new CliError('--fail-on must be one of: none, unused, shadowed, pattern-mismatch, out-of-scope, any.')
   }
 
+  const qualityPolicy = options.policy ? loadQualityPolicy(options.policy) : null
   const sourceLanguage = options['source-language'] ?? 'auto'
   const targetLanguage = options['target-language'] ?? 'zh-Hans'
   const languagePattern = /^(?:auto|[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)$/u
