@@ -33,6 +33,10 @@ test('glossary normalization accepts valid terms and skips malformed or duplicat
   assert.equal(normalizeGlossary({ API: '接口' }).length, 0)
 })
 
+test('the Host config disables the glossary by default', () => {
+  assert.deepEqual(resolveConfig(undefined).glossary, [])
+})
+
 test('glossary normalization caps the number and length of configured terms', () => {
   const glossary = normalizeGlossary(
     Array.from({ length: MAX_GLOSSARY_ENTRIES + 20 }, (_, index) => ({
