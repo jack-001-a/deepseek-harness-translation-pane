@@ -29,6 +29,10 @@ Useful areas include:
 
 See [ROADMAP.md](ROADMAP.md) for proposed priorities. Roadmap items are discussion points, not promises or a fixed release schedule.
 
+## Bug reports and feature requests
+
+Use the repository's GitHub issue forms when available. Bug reports should include exact reproduction steps, Harness and plugin versions, operating system, translation route, and sanitized error details. Never attach real confidential source text, translated text, credentials or personal information.
+
 ## Pull request expectations
 
 Please keep changes focused and explain:
