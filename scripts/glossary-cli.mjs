@@ -17,7 +17,7 @@ const USAGE = [
   '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json]',
   '  dsh-translation-glossary audit <file|-> (--text <text> | --text-file <path>)',
   '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json]',
-  '      [--fail-on none|unused|shadowed|pattern-mismatch|out-of-scope|any]',
+  '      [--fail-on none|unused|shadowed|pattern-mismatch|out-of-scope|any] [--policy <file>]',
   '',
   'Use "-" or omit the glossary file to read glossary JSON from stdin.',
   'Exit codes: 0 success/policy pass, 1 invalid glossary or failed audit policy, 2 usage or file error.',
@@ -110,6 +110,7 @@ function preview(args) {
   }
   const format = options.format ?? 'text'
   if (!['text', 'json'].includes(format)) throw new CliError('--format must be "text" or "json".')
+  const qualityPolicy = options.policy ? loadQualityPolicy(options.policy) : null
   const sourceLanguage = options['source-language'] ?? 'auto'
   const targetLanguage = options['target-language'] ?? 'zh-Hans'
   const languagePattern = /^(?:auto|[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*)$/u
@@ -577,10 +578,73 @@ function explain(args) {
 }
 
  
+
+const QUALITY_POLICY_FIELDS = new Set([
+  'minCoveragePercent',
+  'maxUnusedRules',
+  'maxShadowedOccurrences',
+  'maxPatternMismatchRules',
+  'maxOutOfScopeRules',
+])
+
+function loadQualityPolicy(filePath) {
+  const input = readTextFile(filePath, 'quality policy file')
+  let parsed
+  try {
+    parsed = JSON.parse(input)
+  } catch {
+    throw new CliError('Quality policy must be valid JSON.')
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed) || parsed.version !== 1) {
+    throw new CliError('Quality policy must be an object with version: 1.')
+  }
+  for (const key of Object.keys(parsed)) {
+    if (key !== 'version' && !QUALITY_POLICY_FIELDS.has(key)) {
+      throw new CliError('Unknown quality policy field: ' + key)
+    }
+  }
+  const policy = {}
+  for (const field of QUALITY_POLICY_FIELDS) {
+    if (!Object.hasOwn(parsed, field)) continue
+    const value = parsed[field]
+    if (field === 'minCoveragePercent') {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 100) {
+        throw new CliError('minCoveragePercent must be a number between 0 and 100.')
+      }
+    } else if (!Number.isInteger(value) || value < 0 || value > 1000000) {
+      throw new CliError(field + ' must be an integer between 0 and 1000000.')
+    }
+    policy[field] = value
+  }
+  if (Object.keys(policy).length === 0) {
+    throw new CliError('Quality policy must define at least one threshold.')
+  }
+  return policy
+}
+
+function evaluateQualityPolicy(policy, summary) {
+  if (!policy) return []
+  const metrics = {
+    minCoveragePercent: { metric: 'coveragePercent', actual: summary.coveragePercent, operator: '>=', threshold: policy.minCoveragePercent },
+    maxUnusedRules: { metric: 'unusedRules', actual: summary.unusedRules, operator: '<=', threshold: policy.maxUnusedRules },
+    maxShadowedOccurrences: { metric: 'shadowedOccurrences', actual: summary.shadowedOccurrences, operator: '<=', threshold: policy.maxShadowedOccurrences },
+    maxPatternMismatchRules: { metric: 'patternMismatchRules', actual: summary.patternMismatchRules, operator: '<=', threshold: policy.maxPatternMismatchRules },
+    maxOutOfScopeRules: { metric: 'outOfScopeRules', actual: summary.outOfScopeRules, operator: '<=', threshold: policy.maxOutOfScopeRules },
+  }
+  return Object.entries(metrics)
+    .filter(([field]) => Object.hasOwn(policy, field))
+    .map(([field, check]) => ({
+      ...check,
+      passed: field === 'minCoveragePercent'
+        ? check.actual >= check.threshold
+        : check.actual <= check.threshold,
+    }))
+}
+
 function audit(args) {
   const { positional, options } = parseOptions(
     args,
-    new Set(['format', 'text', 'text-file', 'source-language', 'target-language', 'fail-on', 'output']),
+    new Set(['format', 'text', 'text-file', 'source-language', 'target-language', 'fail-on', 'output', 'policy']),
   )
   if (positional.length !== 1) throw new CliError('audit requires exactly one glossary file (use "-" for stdin).')
   if (Object.hasOwn(options, 'text') === Object.hasOwn(options, 'text-file')) {
@@ -728,10 +792,20 @@ function audit(args) {
   const failureReasons = allFindings.filter((finding) =>
     failCategories.has(finding.category) && finding.count > 0,
   )
+  const qualityChecks = evaluateQualityPolicy(qualityPolicy, summary)
+  const qualityFailures = qualityChecks.filter((check) => !check.passed)
   const ciPolicy = {
     failOn,
-    passed: failureReasons.length === 0,
+    passed: failureReasons.length === 0 && qualityFailures.length === 0,
     failureReasons,
+    qualityPolicy: qualityPolicy
+      ? {
+          file: options.policy,
+          thresholds: qualityPolicy,
+          checks: qualityChecks,
+          failureReasons: qualityFailures,
+        }
+      : null,
   }
   const report = {
     command: 'audit',
@@ -768,6 +842,7 @@ function audit(args) {
     )
     process.stdout.write(
       'CI gate: --fail-on ' + failOn + ' => ' + (ciPolicy.passed ? 'PASS' : 'FAIL') + '\n',
+      ...(qualityPolicy ? ['Quality policy checks: ' + qualityChecks.filter((check) => check.passed).length + '/' + qualityChecks.length + ' passed\\n'] : []),
     )
     process.stdout.write(
       'Rules: ' + summary.totalRules +

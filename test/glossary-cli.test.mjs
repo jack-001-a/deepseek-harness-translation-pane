@@ -415,6 +415,62 @@ test('audit can fail CI selectively while still emitting its JSON report', (t) =
 
 
 
+
+test('audit enforces versioned quality policy thresholds and reports every check', (t) => {
+  const glossary = fixture(t, JSON.stringify([
+    { source: 'API', target: '接口', sourceLanguage: 'en', targetLanguage: 'zh-Hans' },
+    { source: 'Missing', target: '缺失', sourceLanguage: 'en', targetLanguage: 'zh-Hans' },
+  ]))
+  const source = fixture(t, 'API gateway')
+  const policy = fixture(t, JSON.stringify({
+    version: 1,
+    minCoveragePercent: 30,
+    maxUnusedRules: 0,
+    maxShadowedOccurrences: 0,
+  }))
+  const common = ['audit', glossary, '--source-language', 'en', '--target-language', 'zh-Hans', '--text-file', source, '--format', 'json', '--policy', policy]
+  const failing = runCli(common)
+  assert.equal(failing.status, 1)
+  const report = JSON.parse(failing.stdout)
+  assert.equal(report.ciPolicy.passed, false)
+  assert.equal(report.ciPolicy.qualityPolicy.file, policy)
+  assert.deepEqual(report.ciPolicy.qualityPolicy.checks.map((check) => check.metric), [
+    'coveragePercent', 'unusedRules', 'shadowedOccurrences',
+  ])
+  assert.deepEqual(report.ciPolicy.qualityPolicy.checks.map((check) => check.passed), [false, false, true])
+  assert.equal(report.ciPolicy.qualityPolicy.failureReasons.length, 2)
+
+  const passingPolicy = fixture(t, JSON.stringify({
+    version: 1,
+    minCoveragePercent: 20,
+    maxUnusedRules: 1,
+    maxShadowedOccurrences: 0,
+  }))
+  const passing = runCli([...common.slice(0,-1), passingPolicy])
+  assert.equal(passing.status, 0, passing.stderr)
+  assert.equal(JSON.parse(passing.stdout).ciPolicy.qualityPolicy.failureReasons.length, 0)
+})
+
+test('audit rejects malformed, unknown and empty quality policy definitions', (t) => {
+  const glossary = fixture(t, '[{"source":"API","target":"接口"}]')
+  const source = fixture(t, 'API')
+  const invalidPolicies = [
+    '{"version":2,"minCoveragePercent":80}',
+    '{"version":1,"minCoveragePercent":101}',
+    '{"version":1,"maxUnusedRules":-1}',
+    '{"version":1,"unknownThreshold":2}',
+    '{"version":1}',
+    '{not-json',
+  ]
+  for (const value of invalidPolicies) {
+    const policy = fixture(t, value)
+    const result = runCli(['audit', glossary, '--text-file', source, '--format', 'json', '--policy', policy])
+    assert.equal(result.status, 2)
+    assert.match(result.stderr, /Quality policy/)
+  }
+})
+
+
 test('fix removes runtime-ignored duplicates but preserves overlapping rules for review', (t) => {
   const source = fixture(t, JSON.stringify([
     { source: 'API', target: '接口' },
