@@ -472,6 +472,44 @@ test('audit rejects malformed, unknown and empty quality policy definitions', (t
 
 
 
+
+test('policy validate checks a standalone quality policy without glossary or sample inputs', (t) => {
+  const policy = fixture(t, JSON.stringify({
+    $schema: './glossary-policy.schema.json',
+    version: 1,
+    minCoveragePercent: 80,
+    maxUnusedRules: 1,
+  }))
+  const result = runCli(['policy', 'validate', policy, '--format', 'json'])
+  assert.equal(result.status, 0, result.stderr)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.command, 'policy validate')
+  assert.equal(report.valid, true)
+  assert.equal(report.version, 1)
+  assert.equal(report.schema, './glossary-policy.schema.json')
+  assert.equal(report.thresholdCount, 2)
+  assert.deepEqual(report.thresholds, {
+    minCoveragePercent: 80,
+    maxUnusedRules: 1,
+  })
+})
+
+test('policy validate rejects invalid policy files and unknown subcommands', (t) => {
+  const invalid = fixture(t, '{"version":1,"minCoveragePercent":101}')
+  const malformed = fixture(t, '{broken')
+  const badThreshold = runCli(['policy', 'validate', invalid])
+  const badJson = runCli(['policy', 'validate', malformed])
+  const unsupported = runCli(['policy', 'init', invalid])
+
+  assert.equal(badThreshold.status, 2)
+  assert.match(badThreshold.stderr, /minCoveragePercent/)
+  assert.equal(badJson.status, 2)
+  assert.match(badJson.stderr, /Quality policy must be valid JSON/)
+  assert.equal(unsupported.status, 2)
+  assert.match(unsupported.stderr, /policy supports only the validate/)
+})
+
+
 test('quality policy accepts optional schema metadata and ships a matching JSON Schema', (t) => {
   const policy = fixture(t, JSON.stringify({
     $schema: './glossary-policy.schema.json',

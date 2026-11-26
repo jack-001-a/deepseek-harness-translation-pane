@@ -9,6 +9,7 @@ import { glossarySegments, languageScopeMatches, parseGlossaryImport, serializeG
 const USAGE = [
   'Usage:',
   '  dsh-translation-glossary validate [file|-] [--format text|json]',
+  '  dsh-translation-glossary policy validate <policy-file> [--format text|json]',
   '  dsh-translation-glossary fix <file> --output <new-file> [--format text|json]',
   '  dsh-translation-glossary preview [file|-] (--text <text> | --text-file <path>)',
   '      [--source-language <tag|auto>] [--target-language <tag>] [--format text|json|sarif] [--output <path>]',
@@ -955,6 +956,46 @@ function fixGlossary(args) {
   return 0
 }
 
+
+function validateQualityPolicyCommand(args) {
+  const { positional, options } = parseOptions(args, new Set(['format']))
+  if (positional.length !== 1 || positional[0] === '-') {
+    throw new CliError('policy validate requires exactly one file path; stdin is not supported.')
+  }
+  const format = options.format ?? 'text'
+  if (!['text', 'json'].includes(format)) throw new CliError('--format must be "text" or "json".')
+
+  const input = readTextFile(positional[0], 'quality policy file')
+  let document
+  try {
+    document = JSON.parse(input)
+  } catch {
+    throw new CliError('Quality policy must be valid JSON.')
+  }
+  const thresholds = loadQualityPolicy(positional[0])
+  const report = {
+    command: 'policy validate',
+    valid: true,
+    policyFile: positional[0],
+    version: document.version,
+    schema: document.$schema ?? null,
+    thresholdCount: Object.keys(thresholds).length,
+    thresholds,
+  }
+
+  if (format === 'json') {
+    writeJson(report)
+  } else {
+    process.stdout.write('Quality policy is valid (version ' + report.version + ').\n')
+    process.stdout.write('Thresholds configured: ' + report.thresholdCount + '\n')
+    if (report.schema) process.stdout.write('Schema: ' + report.schema + '\n')
+    for (const [name, value] of Object.entries(thresholds)) {
+      process.stdout.write(name + ': ' + value + '\n')
+    }
+  }
+  return 0
+}
+
 function main(argv) {
   if (argv.length === 0 || (argv.length === 1 && argv[0] === '--help')) {
     process.stdout.write(USAGE + '\n')
@@ -963,6 +1004,10 @@ function main(argv) {
   const [command, ...args] = argv
   try {
     if (command === 'fix') return fixGlossary(args)
+    if (command === 'policy') {
+      if (args[0] !== 'validate') throw new CliError('policy supports only the validate subcommand.')
+      return validateQualityPolicyCommand(args.slice(1))
+    }
     if (command === 'validate') return validate(args)
     if (command === 'preview') return preview(args)
     if (command === 'diff') return diff(args)

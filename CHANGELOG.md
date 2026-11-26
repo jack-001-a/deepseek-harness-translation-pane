@@ -27,6 +27,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Add safe glossary normalization to a separate output file and emit GitHub Actions annotations plus a Job Summary.
 - Add versioned glossary quality policies with coverage and finding thresholds for CLI and GitHub Actions.
 - Publish a JSON Schema 2020-12 definition for quality policy files and editor validation.
+- Add a standalone `policy validate` command to check quality policy files without running a glossary audit.
 - Clarify overlap precedence: earliest source position wins, then per-position priority, match length and original entry order.
 
 

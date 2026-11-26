@@ -364,6 +364,9 @@ npm run glossary -- audit path/to/glossary.json \
   --source-language en --target-language zh-Hans \
   --text-file ./samples/source.txt --policy ./config/glossary-policy.json --format json
 
+# Validate the policy file independently before wiring it into CI.
+npm run glossary -- policy validate ./config/glossary-policy.json --format json
+
 # Generate a SARIF 2.1.0 report for GitHub Code Scanning.
 npm run glossary -- audit path/to/glossary.json \
   --source-language en --target-language zh-Hans \
@@ -408,7 +411,7 @@ version 1 policy supports `minCoveragePercent`, `maxUnusedRules`,
 `maxShadowedOccurrences`, `maxPatternMismatchRules` and
 `maxOutOfScopeRules`. Every configured threshold is evaluated and included
 in the JSON / SARIF report; a failed threshold returns exit code 1. See
-`config/glossary-policy.example.json` for a starter file. The sample includes a `$schema` reference to
+`config/glossary-policy.example.json` for a starter file. Use `policy validate <file>` to check a policy on its own before running an audit; it does not require glossary or sample inputs. The sample includes a `$schema` reference to
 `config/glossary-policy.schema.json`, a JSON Schema 2020-12 document for editor
 completion and validation. The CLI accepts this metadata but evaluates only
 the supported threshold fields. The composite Action
