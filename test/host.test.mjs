@@ -782,6 +782,34 @@ test('retry: overflowing but valid decimal Retry-After hints stay within the con
   assert.deepEqual(delays, [1000])
 })
 
+test('retry: RFC 850 dates more than 50 years ahead map to the most recent past year', async (t) => {
+  let attempts = 0
+  mockFetch(async () => {
+    attempts += 1
+    if (attempts === 1) {
+      return jsonResponse({}, { status: 429, headers: { 'retry-after': 'Friday, 21-Oct-77 07:28:00 GMT' } })
+    }
+    return jsonResponse(bingPayload('ok'))
+  }, t)
+
+  const h = harness({
+    config: { failover: false, maxRetries: 1, retryBaseMs: 100, retryMaxMs: 5000, jitter: () => 1 },
+  })
+  const delays = []
+  h.service.sleep = async (ms) => {
+    delays.push(ms)
+  }
+
+  const result = await h.service.translate({ text: 'RFC 850 past-century date', targetLanguage: 'en' })
+  assert.equal(result.text, 'ok')
+  assert.equal(attempts, 2)
+  assert.deepEqual(
+    delays,
+    [0],
+    '2077 is more than 50 years ahead in 2026, so the RFC 850 year must be interpreted as 1977',
+  )
+})
+
 test('retry: valid HTTP-date forms are honoured as Retry-After values', async (t) => {
   let retryAfter = 'Wed, 21 Oct 2099 07:28:00 GMT'
   let attempts = 0
@@ -804,7 +832,7 @@ test('retry: valid HTTP-date forms are honoured as Retry-After values', async (t
   for (const [index, date] of [
     [0, 'Wed, 21 Oct 2099 07:28:00 GMT'],
     [1, 'Thursday, 21-Oct-49 07:28:00 GMT'],
-    // RFC 850's 50-year rule maps "50" to 2050 in 2026, not 1950.
+    // A two-digit year still in the 50-year window maps to this century.
     [2, 'Friday, 21-Oct-50 07:28:00 GMT'],
     [3, 'Wed Oct 21 07:28:00 2099'],
   ]) {
