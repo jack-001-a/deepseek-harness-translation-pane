@@ -285,7 +285,7 @@ if (policyBaseRef) {
       lines.push('', policyDiffCounts.passed
         ? 'The selected policy diff gate passed.'
         : 'The selected policy diff gate failed; review the threshold changes before merging.', '')
-      appendFileSync(summaryFile, lines.join('\\n'), 'utf8')
+      appendFileSync(summaryFile, lines.join('\n'), 'utf8')
     }
   } finally {
     rmSync(tempDirectory, { recursive: true, force: true })
