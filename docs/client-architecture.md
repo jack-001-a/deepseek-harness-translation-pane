@@ -65,3 +65,8 @@ and reproducible maintenance; Harness still loads only `client.js`.
 ### Glossary mutation lifecycle
 
 The glossary editor owns an AbortController for its active Host mutation. Unmounting the panel aborts that RPC, and the same controller ref closes the same-turn duplicate-submit window before React publishes the busy state. A late response is ignored after cancellation.
+
+
+### Shared preferences and imports
+
+Translation preferences live in a factory-scoped shared snapshot and notify every mounted panel when one field changes. Persistence writes the merged current snapshot, so one panel cannot overwrite a sibling panel's newer preference with stale fields. Glossary imports use a monotonically increasing request sequence: the most recently selected file wins even when an earlier file read resolves later, and unmount invalidates outstanding reads.

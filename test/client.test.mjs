@@ -945,6 +945,54 @@ test('simultaneous panel instances keep DOM ids and translation cancellation iso
   second.unmount()
 })
 
+test('simultaneous panels share preference changes without overwriting other fields', async () => {
+  loadPluginState = await loadPlugin()
+  await withPreferences({
+    sourceLanguage: 'auto',
+    targetLanguage: 'zh-Hans',
+    provider: 'bing',
+    format: 'text',
+  }, async (store) => {
+    const { registrations, dictionaries } = applyPlugin(loadPluginState.plugin, 'en')
+    const table = dictionaries[NS].en
+    const t = (key, params) => {
+      const template = table[key] ?? key
+      if (!params) return template
+      return template.replace(/\{(\w+)\}/g, (match, name) =>
+        name in params ? String(params[name]) : match,
+      )
+    }
+    const page = registrations.main.component
+    const first = mount(page, { t })
+    const second = mount(page, { t })
+    await flushPanel()
+
+    const select = (owner, suffix) => findOne(
+      owner.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith(suffix),
+      `the ${suffix} selector`,
+    )
+    select(first, '-source').props.onChange({ target: { value: 'fr' } })
+    await flushPanel()
+    assert.equal(select(first, '-source').props.value, 'fr')
+    assert.equal(select(second, '-source').props.value, 'fr', 'a sibling panel receives the change')
+
+    select(second, '-format').props.onChange({ target: { value: 'markdown' } })
+    await flushPanel()
+    assert.equal(select(first, '-format').props.value, 'markdown')
+    assert.equal(select(second, '-format').props.value, 'markdown')
+    assert.deepEqual(JSON.parse(store.get(STORAGE_KEY)), {
+      sourceLanguage: 'fr',
+      targetLanguage: 'zh-Hans',
+      provider: 'bing',
+      format: 'markdown',
+    }, 'writing one panel field must preserve the other panel’s newer field')
+
+    first.unmount()
+    second.unmount()
+  })
+})
+
 test('same-text submissions in one event turn share a single request', async () => {
   loadPluginState = await loadPlugin()
   let calls = 0
@@ -1387,6 +1435,49 @@ test('the glossary editor can load a JSON file into its draft', async () => {
     'the glossary JSON editor',
   )
   assert.deepEqual(JSON.parse(editor.props.value).glossary, [{ source: 'API', target: '接口' }])
+})
+
+test('the most recently selected glossary file wins when reads finish out of order', async () => {
+  loadPluginState = await loadPlugin()
+  const pendingReads = []
+  const { mounted } = mountPanel()
+  await flushPanel()
+  const fileInput = findOne(
+    mounted.tree,
+    (node) => node.type === 'input' && node.props?.type === 'file',
+    'the glossary JSON file input',
+  )
+  const chooseFile = (name) => fileInput.props.onChange({
+    target: {
+      files: [{
+        size: 20,
+        text: () => new Promise((resolve, reject) => {
+          pendingReads.push({ name, resolve, reject })
+        }),
+      }],
+      value: name,
+    },
+  })
+
+  chooseFile('older.json')
+  chooseFile('newer.json')
+  assert.equal(pendingReads.length, 2)
+  pendingReads[1].resolve(JSON.stringify({ version: 1, glossary: [{ source: 'new', target: '新' }] }))
+  await flushPanel()
+  pendingReads[0].resolve(JSON.stringify({ version: 1, glossary: [{ source: 'old', target: '旧' }] }))
+  await flushPanel()
+
+  const editor = findOne(
+    mounted.tree,
+    (node) => node.type === 'textarea' && String(node.props?.className).includes('dshTr-glossaryArea'),
+    'the glossary JSON editor',
+  )
+  assert.deepEqual(
+    JSON.parse(editor.props.value).glossary,
+    [{ source: 'new', target: '新' }],
+    'a slower earlier read must not replace the latest user selection',
+  )
+  mounted.unmount()
 })
 
 test('the workbench has deliberate empty/loading states and a progressive glossary disclosure', async () => {

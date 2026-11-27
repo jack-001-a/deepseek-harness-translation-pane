@@ -1000,26 +1000,41 @@ function resolveProviderPresentation(options) {
       return active
     }
 
+    // Multiple mounted panels belong to one workbench context. Keep their
+    // preference snapshot in the shared factory closure so updates merge
+    // against the latest value and every mounted panel sees the same choice.
+    let sharedPreferencesSnapshot = null
+    const preferenceSubscribers = new Set()
+
+    function getSharedPreferences() {
+      if (sharedPreferencesSnapshot === null) {
+        sharedPreferencesSnapshot = normalizePreferences(readPreferences(), PROVIDER_CATALOG)
+      }
+      return sharedPreferencesSnapshot
+    }
+
+    function publishSharedPreferences(next) {
+      sharedPreferencesSnapshot = next
+      writePreferences(next)
+      for (const subscriber of [...preferenceSubscribers]) subscriber(next)
+    }
+
     /**
      * Own the user's language, provider and translation-format preferences.
      *
-     * Read storage once, normalize known enum values, preserve non-empty
-     * language tags from older/custom Hosts, and keep the selected provider
-     * inside the currently advertised Host catalog.
+     * A factory-scoped snapshot prevents simultaneously mounted panels from
+     * overwriting each other's newer fields with stale local snapshots.
      * @param providers - provider ids advertised by the current Host.
      * @returns preference values and stable setters.
      */
     function useTranslationPreferences({ providers }) {
-      const [preferences, setPreferences] = React.useState(() =>
-        normalizePreferences(readPreferences(), PROVIDER_CATALOG),
-      )
+      const [preferences, setPreferences] = React.useState(getSharedPreferences)
 
       const update = React.useCallback((key, value) => {
-        setPreferences((previous) => {
-          const next = typeof value === 'function' ? value(previous[key]) : value
-          if (Object.is(next, previous[key])) return previous
-          return { ...previous, [key]: next }
-        })
+        const previous = getSharedPreferences()
+        const nextValue = typeof value === 'function' ? value(previous[key]) : value
+        if (Object.is(nextValue, previous[key])) return
+        publishSharedPreferences({ ...previous, [key]: nextValue })
       }, [])
       const setSourceLanguage = React.useCallback(
         (value) => update('sourceLanguage', value),
@@ -1033,14 +1048,22 @@ function resolveProviderPresentation(options) {
       const setFormat = React.useCallback((value) => update('format', value), [update])
 
       React.useEffect(() => {
+        const sync = (next) => setPreferences(next)
+        preferenceSubscribers.add(sync)
+        sync(getSharedPreferences())
+        // Persist the normalized initial snapshot, but always read the
+        // current shared value so a late mount cannot restore stale state.
+        writePreferences(getSharedPreferences())
+        return () => {
+          preferenceSubscribers.delete(sync)
+        }
+      }, [])
+
+      React.useEffect(() => {
         if (providers.length > 0 && !providers.includes(preferences.provider)) {
           setProvider(providers[0])
         }
       }, [providers, preferences.provider, setProvider])
-
-      React.useEffect(() => {
-        writePreferences(preferences)
-      }, [preferences])
 
       return {
         ...preferences,
@@ -1350,6 +1373,7 @@ function resolveProviderPresentation(options) {
       const [glossaryOpen, setGlossaryOpen] = React.useState(false)
       const { glossaryDraft, setGlossaryDraft, glossaryDraftDirtyRef } = options
       const applyAbortRef = React.useRef(null)
+      const importSeqRef = React.useRef(0)
 
       // Applying a glossary is a Host mutation, so stop its transport work
       // when this editor leaves the page. The ref also closes the same-turn
@@ -1357,6 +1381,7 @@ function resolveProviderPresentation(options) {
       React.useEffect(() => () => {
         applyAbortRef.current?.abort()
         applyAbortRef.current = null
+        importSeqRef.current += 1
       }, [])
 
       const applyGlossary = React.useCallback(async () => {
@@ -1412,6 +1437,7 @@ function resolveProviderPresentation(options) {
 
       const importGlossaryFile = React.useCallback(async (event) => {
         if (!mountedRef.current) return
+        const seq = ++importSeqRef.current
         const file = event.target.files?.[0]
         if (!file) {
           event.target.value = ''
@@ -1419,17 +1445,19 @@ function resolveProviderPresentation(options) {
         }
         event.target.value = ''
         if (file.size > 256 * 1024 || typeof file.text !== 'function') {
-          setGlossaryMessage(t('glossary.invalidFile'))
+          if (seq === importSeqRef.current) setGlossaryMessage(t('glossary.invalidFile'))
           return
         }
         try {
           const contents = await file.text()
-          if (!mountedRef.current) return
+          if (!mountedRef.current || seq !== importSeqRef.current) return
           setGlossaryDraft(contents)
           glossaryDraftDirtyRef.current = true
           setGlossaryMessage(null)
         } catch {
-          if (mountedRef.current) setGlossaryMessage(t('glossary.invalidFile'))
+          if (mountedRef.current && seq === importSeqRef.current) {
+            setGlossaryMessage(t('glossary.invalidFile'))
+          }
         }
       }, [mountedRef, t])
 
