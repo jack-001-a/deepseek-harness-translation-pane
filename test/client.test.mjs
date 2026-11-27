@@ -101,8 +101,15 @@ function createReact() {
         deps === undefined ||
         changed(previous.deps, deps)
       owner.values[index] = { deps: deps === undefined ? undefined : [...deps] }
-      // Effects run after the render, exactly like the browser does.
-      if (isChanged) owner.effects.push(effect)
+      // Effects run after the render, exactly like the browser does. Keep
+      // their cleanup so unmount and Strict Mode replay can be exercised.
+      if (isChanged) {
+        owner.effects.push(() => {
+          owner.cleanups[index]?.()
+          const cleanup = effect()
+          owner.cleanups[index] = typeof cleanup === 'function' ? cleanup : undefined
+        })
+      }
     },
   }
 }
@@ -183,7 +190,8 @@ function applyPlugin(plugin, locale, options = {}) {
       rpc: {
         call: (_channel, endpoint, payload, signal) => {
           if (endpoint === 'translationPane/describe') {
-            return Promise.resolve({ ok: true, value: describe })
+            const value = typeof describe === 'function' ? describe(signal) : describe
+            return Promise.resolve(value).then((resolved) => ({ ok: true, value: resolved }))
           }
           if (endpoint === 'translationPane/translate') {
             return Promise.resolve(translate(payload?.args, signal)).then((value) => {
@@ -248,7 +256,7 @@ function applyPlugin(plugin, locale, options = {}) {
  * @returns the mount handle.
  */
 function mount(Component, props) {
-  const owner = { index: 0, values: [], tree: undefined, scheduled: false, effects: [] }
+  const owner = { index: 0, values: [], tree: undefined, scheduled: false, effects: [], cleanups: [] }
 
   /**
    * Replace every component element with the tree it renders.
@@ -293,6 +301,12 @@ function mount(Component, props) {
     })
   }
   draw()
+  owner.unmount = () => {
+    for (let index = owner.cleanups.length - 1; index >= 0; index -= 1) {
+      owner.cleanups[index]?.()
+      owner.cleanups[index] = undefined
+    }
+  }
   return owner
 }
 
@@ -579,6 +593,60 @@ test('a running translation disables translating and can be cancelled', async ()
   )
   assert.equal(textOf(status), 'Cancelled')
   assert.equal(translateButton(mounted.tree).props.disabled, false)
+})
+
+test('the latest Host description wins when refresh responses arrive out of order', async () => {
+  loadPluginState = await loadPlugin()
+  const pendingDescriptions = []
+  const signals = []
+  const { mounted } = mountPanel({
+    describe: (signal) => new Promise((resolve) => {
+      signals.push(signal)
+      pendingDescriptions.push(resolve)
+    }),
+    translate: () => ({
+      text: 'translated',
+      provider: 'bing',
+      requestedProvider: 'bing',
+      failover: false,
+    }),
+  })
+  await flushPanel()
+  assert.equal(pendingDescriptions.length, 1, 'the panel should start with one Host description')
+
+  await typeSource(mounted, 'hello')
+  translateButton(mounted.tree).props.onClick()
+  await flushPanel()
+  assert.equal(pendingDescriptions.length, 2, 'a successful translation should refresh Host metadata')
+  assert.equal(signals[0].aborted, true, 'the newer refresh must cancel the superseded RPC')
+
+  pendingDescriptions[1]({ ...HOST_DESCRIBE, maxTextChars: 1234 })
+  await flushPanel()
+  assert.match(textOf(mounted.tree), /\\/ 1234/, 'the newer metadata should become visible')
+
+  // Simulate an RPC carrier that still delivers a response after cancellation.
+  pendingDescriptions[0]({ ...HOST_DESCRIBE, maxTextChars: 111 })
+  await flushPanel()
+  assert.match(textOf(mounted.tree), /\\/ 1234/, 'a stale response must not overwrite the latest Host facts')
+
+  mounted.unmount()
+  assert.equal(signals[1].aborted, true, 'unmount must abort the active metadata refresh')
+})
+
+test('unmount aborts a pending Host description', async () => {
+  loadPluginState = await loadPlugin()
+  let requestSignal
+  const { mounted } = mountPanel({
+    describe: (signal) => {
+      requestSignal = signal
+      return new Promise(() => {})
+    },
+  })
+  await flushPanel()
+  assert.ok(requestSignal, 'the Host description RPC must receive an AbortSignal')
+  assert.equal(requestSignal.aborted, false)
+  mounted.unmount()
+  assert.equal(requestSignal.aborted, true, 'closing the panel must stop the metadata request')
 })
 
 test('editing the source cancels the request and ignores its late result', async () => {
