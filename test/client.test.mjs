@@ -632,6 +632,32 @@ test('every option of every select has a name in the English UI', async () => {
   }
 })
 
+test('duplicate Host catalog ids render once and retain advertised order', async () => {
+  loadPluginState = await loadPlugin()
+  const { mounted } = mountPanel({
+    describe: {
+      ...HOST_DESCRIBE,
+      languages: ['auto', 'en', 'en', 'custom-lang-x', 'custom-lang-x', 'zh-Hans'],
+      providers: ['google', 'bing', 'google', 'bing'],
+    },
+  })
+  await flushPanel()
+
+  const optionValues = (suffix) => {
+    const select = findOne(
+      mounted.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith(suffix),
+      `the ${suffix} selector`,
+    )
+    return findAll(select.children, (node) => node.type === 'option').map((node) => node.props.value)
+  }
+
+  assert.deepEqual(optionValues('-source'), ['auto', 'en', 'custom-lang-x', 'zh-Hans'])
+  assert.deepEqual(optionValues('-target'), ['en', 'custom-lang-x', 'zh-Hans'])
+  assert.deepEqual(optionValues('-service'), ['google', 'bing'])
+  mounted.unmount()
+})
+
 test('the service select names the services in the active locale', async () => {
   loadPluginState = await loadPlugin()
   const chinese = renderPanel('zh')

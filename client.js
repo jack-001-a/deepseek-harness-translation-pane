@@ -635,6 +635,25 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Keep Host-advertised ids unique while preserving their first-seen order.
+     *
+     * Duplicate ids create duplicate React keys and duplicate options, while
+     * dropping non-string/blank entries keeps malformed metadata out of the UI.
+     * Unknown but non-empty ids remain supported for forward compatibility.
+     * @param ids - values advertised by the Host.
+     * @returns unique, non-empty string ids in Host order.
+     */
+    function uniqueCatalogIds(ids) {
+      if (!Array.isArray(ids)) return []
+      const seen = new Set()
+      return ids.filter((id) => {
+        if (typeof id !== 'string' || id.trim().length === 0 || seen.has(id)) return false
+        seen.add(id)
+        return true
+      })
+    }
+
+    /**
      * Build the option list of one language select.
      * @param ids - the language ids the Host advertises, possibly empty.
      * @param includeAuto - whether the "Auto detect" entry is offered.
@@ -642,7 +661,8 @@ window.__ModuleLoader__.load({
      */
     function languageOptions(ids, includeAuto) {
       const known = new Map(LANGUAGE_CATALOG.map((entry) => [entry.id, entry]))
-      const source = ids.length > 0 ? ids : LANGUAGE_CATALOG.map((entry) => entry.id)
+      const advertised = uniqueCatalogIds(ids)
+      const source = advertised.length > 0 ? advertised : LANGUAGE_CATALOG.map((entry) => entry.id)
       const options = []
       for (const id of source) {
         if (id === 'auto' && !includeAuto) continue
@@ -662,9 +682,10 @@ window.__ModuleLoader__.load({
      * @returns the option list, keeping the built-in display names.
      */
     function providerOptions(ids) {
-      if (ids.length === 0) return PROVIDER_CATALOG.slice(0, 1)
+      const advertised = uniqueCatalogIds(ids)
+      if (advertised.length === 0) return PROVIDER_CATALOG.slice(0, 1)
       const known = new Map(PROVIDER_CATALOG.map((entry) => [entry.id, entry]))
-      return ids.map((id) => known.get(id) ?? { id, label: id, zh: id })
+      return advertised.map((id) => known.get(id) ?? { id, label: id, zh: id })
     }
 
     /**
