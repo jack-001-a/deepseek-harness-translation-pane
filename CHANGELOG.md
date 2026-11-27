@@ -6,6 +6,9 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## Unreleased
 
+## [1.5.0] — 2026-11-27
+
+
 ### Changed
 
 - Split browser client source into ordered, dependency-free parts and add a deterministic single-file build with bundle freshness checks.
