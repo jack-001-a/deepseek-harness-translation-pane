@@ -1057,3 +1057,66 @@ test('the glossary editor can load a JSON file into its draft', async () => {
   assert.deepEqual(JSON.parse(editor.props.value).glossary, [{ source: 'API', target: '接口' }])
 })
 
+test('the workbench has deliberate empty/loading states and a progressive glossary disclosure', async () => {
+  loadPluginState = await loadPlugin()
+  let requestCount = 0
+  let finishSecondRequest
+  const { mounted } = mountPanel({
+    translate: () => {
+      requestCount += 1
+      if (requestCount === 1) {
+        return { text: '你好', provider: 'bing', cached: false, durationMs: 12 }
+      }
+      return new Promise((resolve) => {
+        finishSecondRequest = resolve
+      })
+    },
+  })
+  await flushPanel()
+
+  const empty = findOne(
+    mounted.tree,
+    (node) => node.props?.className === 'dshTr-empty',
+    'the result empty state',
+  )
+  assert.match(textOf(empty), /Your translation will appear here/)
+
+  const glossary = findOne(
+    mounted.tree,
+    (node) => node.type === 'details' && node.props?.className === 'dshTr-glossaryDetails',
+    'the advanced glossary disclosure',
+  )
+  assert.equal(glossary.props.open, false, 'advanced editing should not crowd the default workbench')
+
+  await typeSource(mounted, 'hello')
+  translateButton(mounted.tree).props.onClick()
+  await flushPanel()
+  assert.equal(requestCount, 1)
+  const firstResult = findOne(mounted.tree, (node) => node.props?.role === 'region', 'the result region')
+  assert.equal(textOf(firstResult), '你好')
+
+  // Re-running the same source must not leave an old answer visible while the
+  // next request is in flight.
+  translateButton(mounted.tree).props.onClick()
+  await flushPanel()
+  const loading = findOne(
+    mounted.tree,
+    (node) => node.props?.className === 'dshTr-loading',
+    'the in-flight translation indicator',
+  )
+  assert.match(textOf(loading), /Translating/)
+  const pendingResult = findOne(mounted.tree, (node) => node.props?.role === 'region', 'the pending result region')
+  assert.doesNotMatch(textOf(pendingResult), /你好/)
+
+  const style = findOne(mounted.tree, (node) => node.type === 'style', 'the scoped workbench stylesheet')
+  const css = style.props?.dangerouslySetInnerHTML?.__html ?? ''
+  assert.match(css, /prefers-reduced-motion/)
+  assert.match(css, /@container \(max-width: 720px\)/)
+
+  assert.equal(typeof finishSecondRequest, 'function')
+  finishSecondRequest({ text: '再次翻译', provider: 'bing', cached: false, durationMs: 8 })
+  await flushPanel()
+  const finalResult = findOne(mounted.tree, (node) => node.props?.role === 'region', 'the completed result region')
+  assert.equal(textOf(finalResult), '再次翻译')
+  mounted.unmount()
+})

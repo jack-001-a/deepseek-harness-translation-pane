@@ -38,6 +38,8 @@ window.__ModuleLoader__.load({
       'panel.title': 'Translation',
       'page.title': 'Translation',
       'page.subtitle': 'Translate text without leaving the Harness.',
+      'empty.title': 'Your translation will appear here',
+      'empty.description': 'Add text on the left, choose your languages, and translate when you are ready.',
       'field.source': 'Source',
       'field.target': 'Target',
       'field.service': 'Service',
@@ -104,7 +106,7 @@ window.__ModuleLoader__.load({
       'swap.unknown':
         'The source language has not been detected yet, so the languages cannot be swapped. Translate once, then swap.',
       'swap.pending': 'A translation is already running. Cancel it before swapping languages.',
-      'hint.keyboard': 'Ctrl+Enter translates.',
+      'hint.keyboard': 'Ctrl+Enter translates · Esc cancels while translating.',
       'notice.providerDown':
         'The {provider} service is unavailable right now; translations will automatically use the other service.',
       'notice.failover': 'The {requested} service could not answer, so the Host translated with {served}.',
@@ -135,6 +137,8 @@ window.__ModuleLoader__.load({
       'panel.title': '翻译',
       'page.title': '翻译',
       'page.subtitle': '不离开 Harness 就能翻译文本。',
+      'empty.title': '译文将在这里呈现',
+      'empty.description': '在左侧输入文本，选择语言，然后开始翻译。',
       'field.source': '源语言',
       'field.target': '目标语言',
       'field.service': '翻译服务',
@@ -190,7 +194,7 @@ window.__ModuleLoader__.load({
       'swap.same': '源语言与目标语言相同，无需交换。',
       'swap.unknown': '尚未识别出源语言，暂时无法交换语言；先翻译一次即可交换。',
       'swap.pending': '已有翻译正在进行，请先取消再交换语言。',
-      'hint.keyboard': 'Ctrl+Enter 直接翻译。',
+      'hint.keyboard': 'Ctrl+Enter 翻译 · 翻译中按 Esc 取消。',
       'notice.providerDown': '当前 {provider} 服务不可用，翻译将自动改用另一项服务。',
       'notice.failover': '{requested} 服务未能完成翻译，Host 已改用 {served} 完成。',
       'notice.mixed': '这篇文本由多项服务共同完成（{providers}）。',
@@ -334,8 +338,106 @@ window.__ModuleLoader__.load({
 .dshTr-import input { max-width: 180px; font-size: 11px; }
 .dshTr-glossaryMessage, .dshTr-glossaryWarnings { margin: 0; color: var(--dsw-alias-label-secondary); font-size: 11px; line-height: 17px; overflow-wrap: anywhere; }
 .dshTr-glossaryWarnings { padding-left: 18px; color: var(--dsw-alias-state-warn-primary); }
+
 .dshTr-icon { display: block; }
-@container (max-width: 640px) { .dshTr { padding: 16px; } }
+
+/* A calm, high-density workbench with the host application's theme as its source of truth. */
+.dshTr-page { container-type: inline-size; }
+.dshTr { max-width: 1120px; padding: clamp(20px, 2.8vw, 36px) clamp(16px, 3vw, 40px) 48px; }
+.dshTr-head { align-items: center; margin-bottom: 22px; }
+.dshTr-title { font-size: 24px; line-height: 32px; font-weight: 700; letter-spacing: -.025em; }
+.dshTr-subtitle { margin-top: 4px; font-size: 13px; line-height: 20px; }
+.dshTr-status { padding: 5px 11px; gap: 8px; font-size: 12px; backdrop-filter: blur(12px); }
+.dshTr-statusDot { width: 7px; height: 7px; }
+.dshTr-status[data-state="working"] .dshTr-statusDot { animation: dshTr-pulse 1.15s ease-in-out infinite; }
+.dshTr-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px minmax(0, 1fr) minmax(130px, .82fr) minmax(150px, 1fr);
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 18px;
+  padding: 16px;
+  border-radius: 16px;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent);
+}
+.dshTr-field { flex: initial; gap: 6px; }
+.dshTr-fieldLabel { font-size: 12px; line-height: 17px; }
+.dshTr-select { min-height: 40px; padding: 8px 12px; border-radius: 10px; transition: border-color .16s ease, background-color .16s ease; }
+.dshTr-swap { width: 38px; height: 40px; margin-bottom: 0; border-radius: 10px; transition: color .16s ease, border-color .16s ease, background-color .16s ease, transform .16s ease; }
+.dshTr-swap:hover:not([aria-disabled="true"]) { transform: translateY(-1px); }
+.dshTr-grid { align-items: stretch; gap: 16px; }
+.dshTr-card { min-height: 360px; max-height: 560px; border-radius: 16px; box-shadow: 0 1px 2px color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent); }
+.dshTr-cardHead { min-height: 48px; padding: 12px 16px; }
+.dshTr-cardTitle { font-size: 12px; letter-spacing: .06em; }
+.dshTr-area, .dshTr-out { min-height: 300px; padding: 18px 20px; font-size: 14px; line-height: 24px; }
+.dshTr-ghost { padding: 5px 10px; border-radius: 8px; font-size: 12px; line-height: 18px; transition: color .16s ease, background-color .16s ease, border-color .16s ease; }
+.dshTr-button { min-height: 40px; padding: 9px 20px; border-radius: 10px; transition: transform .16s ease, filter .16s ease, box-shadow .16s ease; box-shadow: 0 1px 2px color-mix(in srgb, var(--dsw-alias-label-primary) 12%, transparent); }
+.dshTr-button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 4px 12px color-mix(in srgb, var(--dsw-alias-label-primary) 12%, transparent); }
+.dshTr-button:active:not(:disabled) { transform: translateY(0); }
+.dshTr-buttonGhost { box-shadow: none; }
+.dshTr-foot { margin-top: 16px; gap: 12px; }
+.dshTr-hint, .dshTr-counter { font-size: 12px; line-height: 18px; }
+.dshTr-meta { gap: 8px; margin-top: 14px; }
+.dshTr-meta > span { display: inline-flex; align-items: center; min-height: 26px; padding: 4px 9px; border: 1px solid var(--dsw-alias-border-l1); border-radius: 999px; background: var(--dsw-alias-bg-layer-1); }
+.dshTr-note { font-size: 12px; line-height: 19px; }
+.dshTr-notice, .dshTr-error { padding: 10px 14px; border-radius: 12px; font-size: 12px; line-height: 19px; }
+.dshTr-glossary { margin-top: 24px; padding: 16px; border-radius: 16px; }
+.dshTr-glossaryDetails { display: grid; gap: 10px; }
+.dshTr-glossarySummary { display: flex; align-items: center; gap: 12px; list-style: none; cursor: pointer; }
+.dshTr-glossarySummary::-webkit-details-marker { display: none; }
+.dshTr-glossarySummary:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 4px; border-radius: 6px; }
+.dshTr-glossarySummary::after { content: '+'; flex: none; color: var(--dsw-alias-label-secondary); font-size: 20px; line-height: 20px; }
+.dshTr-glossaryDetails[open] > .dshTr-glossarySummary::after { content: '−'; }
+.dshTr-glossaryHead { flex: 1 1 auto; }
+.dshTr-glossaryArea { min-height: 150px; border-radius: 10px; font-size: 12px; line-height: 19px; }
+.dshTr-import { gap: 8px; border-radius: 10px; }
+.dshTr-empty {
+  display: flex;
+  min-height: 300px;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 28px;
+  text-align: center;
+}
+.dshTr-emptyIcon { display: grid; width: 48px; height: 48px; place-items: center; margin-bottom: 3px; border: 1px solid color-mix(in srgb, var(--dsw-alias-brand-primary) 22%, var(--dsw-alias-border-l1)); border-radius: 15px; color: var(--dsw-alias-brand-primary); background: color-mix(in srgb, var(--dsw-alias-brand-primary) 8%, var(--dsw-alias-bg-layer-2)); }
+.dshTr-emptyIcon .dshTr-icon { width: 24px; height: 24px; }
+.dshTr-emptyTitle { color: var(--dsw-alias-label-primary); font-size: 14px; line-height: 20px; font-weight: 650; }
+.dshTr-emptyDescription { max-width: 36ch; color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 19px; }
+.dshTr-loading { display: flex; min-height: 300px; height: 100%; align-items: center; justify-content: center; gap: 10px; color: var(--dsw-alias-label-secondary); font-size: 13px; }
+.dshTr-spinner { display: block; width: 18px; height: 18px; border: 2px solid var(--dsw-alias-border-l2); border-top-color: var(--dsw-alias-brand-primary); border-radius: 50%; animation: dshTr-spin .8s linear infinite; }
+@keyframes dshTr-spin { to { transform: rotate(360deg); } }
+@keyframes dshTr-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .42; } }
+
+@container (max-width: 720px) {
+  .dshTr { padding: 18px 16px 34px; }
+  .dshTr-controls { grid-template-columns: minmax(0, 1fr) 36px minmax(0, 1fr); gap: 10px; padding: 12px; }
+  .dshTr-grid { grid-template-columns: minmax(0, 1fr); }
+  .dshTr-card { min-height: 280px; max-height: 440px; }
+  .dshTr-area, .dshTr-out, .dshTr-empty, .dshTr-loading { min-height: 230px; }
+  .dshTr-title { font-size: 21px; line-height: 28px; }
+}
+@container (max-width: 420px) {
+  .dshTr { padding: 16px 12px 28px; }
+  .dshTr-head { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .dshTr-controls { grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr); gap: 8px; padding: 10px; }
+  .dshTr-select { padding: 7px 8px; font-size: 12px; }
+  .dshTr-card { min-height: 250px; }
+  .dshTr-area, .dshTr-out, .dshTr-empty, .dshTr-loading { min-height: 210px; }
+  .dshTr-area, .dshTr-out { padding: 14px; }
+  .dshTr-foot { gap: 8px; }
+  .dshTr-button { min-height: 38px; padding: 8px 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dshTr *, .dshTr *::before, .dshTr *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 `
 
     /** One Host failure, carrying the stable code the Host raised. */
@@ -1103,6 +1205,9 @@ window.__ModuleLoader__.load({
         const controller = new AbortController()
         abortRef.current = controller
         inflightTextRef.current = source
+        // Never leave a previous answer beside a new in-flight request.
+        setOutput('')
+        setResult(null)
         setPending(true)
         setStatus('working')
         setError(null)
@@ -1496,9 +1601,43 @@ window.__ModuleLoader__.load({
                 // A scrollable region must be reachable with the keyboard.
                 tabIndex: 0,
               },
-              output.length > 0
-                ? output
-                : h('span', { className: 'dshTr-placeholder', 'aria-hidden': true }, t('placeholder.result')),
+              pending
+                ? h(
+                    'div',
+                    { className: 'dshTr-loading' },
+                    h('span', { className: 'dshTr-spinner', 'aria-hidden': true }),
+                    h('span', null, t('action.translating')),
+                  )
+                : output.length > 0
+                  ? output
+                  : h(
+                      'div',
+                      { className: 'dshTr-empty' },
+                      h(
+                        'span',
+                        { className: 'dshTr-emptyIcon', 'aria-hidden': true },
+                        h(
+                          'svg',
+                          {
+                            className: 'dshTr-icon',
+                            width: 24,
+                            height: 24,
+                            viewBox: '0 0 24 24',
+                            fill: 'none',
+                            stroke: 'currentColor',
+                            strokeWidth: 1.6,
+                            strokeLinecap: 'round',
+                            strokeLinejoin: 'round',
+                          },
+                          h('circle', { cx: 12, cy: 12, r: 8.5 }),
+                          h('path', { d: 'M3.8 12h16.4' }),
+                          h('path', { d: 'M12 3.5c2.1 2.3 3.1 5.1 3.1 8.5s-1 6.2-3.1 8.5' }),
+                          h('path', { d: 'M12 3.5c-2.1 2.3-3.1 5.1-3.1 8.5s1 6.2 3.1 8.5' }),
+                        ),
+                      ),
+                      h('strong', { className: 'dshTr-emptyTitle' }, t('empty.title')),
+                      h('span', { className: 'dshTr-emptyDescription' }, t('empty.description')),
+                    ),
             ),
           ),
         ),
@@ -1584,12 +1723,19 @@ window.__ModuleLoader__.load({
           'section',
           { className: 'dshTr-glossary', 'aria-labelledby': ids.glossary },
           h(
-            'div',
-            { className: 'dshTr-glossaryHead' },
+            'details',
+            { className: 'dshTr-glossaryDetails', open: host.glossaryWarnings.length > 0 },
+            h(
+              'summary',
+              { className: 'dshTr-glossarySummary' },
+              h(
+                'div',
+                { className: 'dshTr-glossaryHead' },
             h('h3', { className: 'dshTr-glossaryTitle', id: ids.glossary }, t('glossary.title')),
-            h('span', { className: 'dshTr-glossaryCount' }, String(host.glossary.length)),
-          ),
-          h('p', { className: 'dshTr-note' }, t('glossary.note')),
+                h('span', { className: 'dshTr-glossaryCount' }, String(host.glossary.length)),
+              ),
+            ),
+            h('p', { className: 'dshTr-note' }, t('glossary.note')),
           h('textarea', {
             className: 'dshTr-glossaryArea',
             value: glossaryDraft,
@@ -1650,6 +1796,7 @@ window.__ModuleLoader__.load({
                 ),
               )
             : null,
+          ),
         ),
       )
     }

@@ -9,7 +9,7 @@
 | 位置 | 功能 |
 |---|---|
 | 侧边栏 | 一个 Translation 入口，在主区域打开翻译页面 |
-| 翻译工作台 | 源语言/目标语言选择、服务选择、普通文本/JSON/Markdown 格式、原文与译文卡片、语言交换、复制、清空、字符计数和 `Ctrl+Enter` 快捷键 |
+| 翻译工作台 | 响应式双栏编辑区、源语言/目标语言与服务选择、普通文本/JSON/Markdown 格式、语言交换、复制、清空、字符计数、请求取消和键盘快捷键 |
 | Provider 故障切换 | 直连模式下，Bing 或 Google 发生可切换的服务级故障时，尝试另一个 Provider，并明确显示实际提供译文的服务 |
 | Agent 工具 | `translate_text(text, targetLanguage, sourceLanguage?, format?)` |
 

@@ -6,6 +6,15 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## Unreleased
 
+### Changed
+
+- Refresh the translation workbench with a responsive, theme-token-driven layout, clearer result states, compact metadata, and reduced-motion support.
+- Collapse advanced glossary editing by default; automatically reveal it when Host-reported glossary warnings need attention.
+
+### Fixed
+
+- Clear the previous translation as soon as a new request starts, and show an explicit in-flight state so stale output cannot be mistaken for the current request.
+
 ## [1.4.0] — 2026-11-27
 
 ### Added
