@@ -77,7 +77,7 @@ export function markdownSegments(source) {
         const nextLineEnd = source.indexOf('\n', nextLineStart)
         const rawTitleLine = source.slice(nextLineStart, nextLineEnd < 0 ? source.length : nextLineEnd)
         const titleLine = rawTitleLine.endsWith('\r') ? rawTitleLine.slice(0, -1) : rawTitleLine
-        if (/^ {0,3}(?:"[^"\n]*"|'[^'\n]*'|\([^)\\n]*\))[ \t]*$/.test(titleLine)) {
+        if (/^ {0,3}(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\))[ \t]*$/.test(titleLine)) {
           definitionEnd = nextLineEnd < 0 ? source.length : nextLineEnd + 1
         }
       }
