@@ -42,12 +42,53 @@ jobs:
 
       - name: Verify the package manifest
         run: |
-          node -e "const p=require('./package.json'); if (p.private) throw new Error('package.json must not be private'); if (!p.repository?.url) throw new Error('repository.url is required for trusted publishing'); if (!p.engines?.node) throw new Error('engines.node is required'); console.log(p.name, p.version)"
+          node -e "const p=require('./package.json'); if (p.private) throw new Error('package.json must not be private'); if (!p.repository?.url) throw new Error('repository.url is required for trusted publishing'); if (!p.engines?.node) throw new Error('engines.node is required'); if (!p.engines?.dsh) throw new Error('engines.dsh is required'); console.log(p.name, p.version)"
 
-      - name: Inspect the tarball contents
+      - name: Verify the published npm archive
+        shell: bash
         run: |
           npm pack --dry-run --json > npm-pack.json
-          node -e "const fs=require('node:fs'); const report=JSON.parse(fs.readFileSync('npm-pack.json','utf8'))[0]; const paths=new Set(report.files.map(file=>file.path)); if (!paths.has('SECURITY.md')) throw new Error('npm tarball is missing SECURITY.md');"
+          node <<'NODE'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync('npm-pack.json', 'utf8'));
+          if (!Array.isArray(report) || !Array.isArray(report[0]?.files)) {
+            throw new Error('npm pack did not return a valid file manifest');
+          }
+          const paths = new Set(report[0].files.map((file) => file.path));
+          const required = [
+            'index.js',
+            'client.js',
+            'cordis.patch.yml',
+            'locale/en.json',
+            'locale/zh.json',
+            'icon.svg',
+            'README.md',
+            'CHANGELOG.md',
+            'LICENSE',
+            'SECURITY.md',
+            'src/host/runtime-state.js',
+            'src/host/text.js',
+            'src/host/markdown.js',
+            'src/host/glossary.js',
+            'scripts/glossary-cli.mjs',
+            'scripts/glossary-sarif.mjs',
+            'scripts/run-glossary-action.mjs',
+            'scripts/run-glossary-policy-review-action.mjs',
+            'config/glossary-policy.example.json',
+            'config/glossary-policy.schema.json',
+          ];
+          const missing = required.filter((path) => !paths.has(path));
+          if (missing.length) {
+            throw new Error('npm archive is missing required runtime or CLI files: ' + missing.join(', '));
+          }
+          const unexpected = [...paths].filter((path) =>
+            path.startsWith('.github/') || path.startsWith('test/'),
+          );
+          if (unexpected.length) {
+            throw new Error('npm archive contains development-only files: ' + unexpected.join(', '));
+          }
+          console.log('npm archive content check passed (' + paths.size + ' files)');
+          NODE
 
   harness-compatibility:
     name: Harness ${{ matrix.harness.version }} / Linux / Node 24

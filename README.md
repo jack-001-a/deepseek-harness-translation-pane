@@ -464,6 +464,8 @@ The installed package also exposes the `dsh-translation-glossary` executable.
 
 ## Install
 
+Requires Node.js `>=22` and DeepSeek Harness `>=0.2.2-rc.4 <0.2.3-0`. The Harness range matches the pinned runtime compatibility matrix and is declared in `package.json` as `engines.dsh`.
+
 From the plugin market: search for **Translation Pane**, or add it by name:
 
 ```bash

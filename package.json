@@ -25,7 +25,8 @@
     "failover"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=22",
+    "dsh": ">=0.2.2-rc.4 <0.2.3-0"
   },
   "scripts": {
     "check": "node --check index.js && node --check client.js && node --check src/host/runtime-state.js && node --check src/host/text.js && node --check src/host/markdown.js && node --check src/host/glossary.js && node --check scripts/run-harness-compatibility.mjs && node --check scripts/glossary-cli.mjs && node --check scripts/glossary-sarif.mjs && node --check scripts/run-glossary-action.mjs && node --check scripts/run-glossary-policy-review-action.mjs",
