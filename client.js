@@ -16,6 +16,159 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const h = React.createElement
 
+/**
+ * Framework-independent client domain rules.
+ *
+ * This is a real ES module for direct Node tests. The browser build inlines
+ * these declarations into the existing ModuleLoader factory; no module
+ * imports execute in the browser.
+ */
+
+const GLOSSARY_WARNING_CODES = Object.freeze([
+  'invalid-entry',
+  'too-many-entries',
+  'duplicate-entry',
+  'conflicting-entry',
+  'overlapping-terms',
+])
+
+/**
+ * Normalize plain glossary records received across the Host RPC boundary.
+ * Invalid rows are skipped instead of turning a valid Host snapshot into a
+ * connection failure.
+ * @param {unknown} glossary - untrusted Host glossary data.
+ * @returns {Array<object>} portable records with only supported fields.
+ */
+function normalizeGlossaryEntries(glossary) {
+  if (!Array.isArray(glossary)) return []
+  return glossary.flatMap((entry) => {
+    if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return []
+    if (typeof entry.source !== 'string' || typeof entry.target !== 'string') return []
+    const source = entry.source.trim()
+    const target = entry.target.trim()
+    const hasControlCharacters = (value) => {
+      for (let index = 0; index < value.length; index += 1) {
+        const code = value.charCodeAt(index)
+        if (code <= 0x1f || code === 0x7f) return true
+      }
+      return false
+    }
+    if (
+      source.length === 0 ||
+      target.length === 0 ||
+      hasControlCharacters(source) ||
+      hasControlCharacters(target)
+    ) return []
+
+    const normalized = { source, target }
+    if (
+      typeof entry.sourceLanguage === 'string' &&
+      entry.sourceLanguage.trim().length > 0 &&
+      entry.sourceLanguage !== '*'
+    ) normalized.sourceLanguage = entry.sourceLanguage
+    if (
+      typeof entry.targetLanguage === 'string' &&
+      entry.targetLanguage.trim().length > 0 &&
+      entry.targetLanguage !== '*'
+    ) normalized.targetLanguage = entry.targetLanguage
+    if (entry.matchCase === true) normalized.matchCase = true
+    if (typeof entry.wholeWord === 'boolean') normalized.wholeWord = entry.wholeWord
+    if (entry.enabled === false) normalized.enabled = false
+    if (
+      Number.isInteger(entry.priority) &&
+      entry.priority >= -1000 &&
+      entry.priority <= 1000 &&
+      entry.priority !== 0
+    ) normalized.priority = entry.priority
+    return [normalized]
+  })
+}
+
+/**
+ * Keep only warning records the current locale can render.
+ * @param {unknown} warnings - untrusted Host warning data.
+ * @returns {Array<{code: string}>} warning records with known localization keys.
+ */
+function normalizeGlossaryWarnings(warnings) {
+  if (!Array.isArray(warnings)) return []
+  return warnings.filter((warning) =>
+    warning !== null &&
+    typeof warning === 'object' &&
+    !Array.isArray(warning) &&
+    GLOSSARY_WARNING_CODES.includes(warning.code),
+  ).map((warning) => ({ code: warning.code }))
+}
+
+/**
+ * Keep Host-advertised ids unique while preserving their first-seen order.
+ * @param {unknown} ids - values advertised by the Host.
+ * @returns {string[]} unique, non-empty string ids in Host order.
+ */
+function uniqueCatalogIds(ids) {
+  if (!Array.isArray(ids)) return []
+  const seen = new Set()
+  return ids.filter((id) => {
+    if (typeof id !== 'string' || id.trim().length === 0 || seen.has(id)) return false
+    seen.add(id)
+    return true
+  })
+}
+
+/** One visual and localized presentation for each workbench status. */
+const STATUS_PRESENTATION = Object.freeze({
+  offline: Object.freeze({ state: 'offline', label: 'status.offline' }),
+  error: Object.freeze({ state: 'error', label: 'status.error' }),
+  pending: Object.freeze({ state: 'working', label: 'status.translating' }),
+  limited: Object.freeze({ state: 'limited', label: 'status.limited' }),
+  cancelled: Object.freeze({ state: 'cancelled', label: 'status.cancelled' }),
+  connecting: Object.freeze({ state: 'connecting', label: 'status.connecting' }),
+  ready: Object.freeze({ state: 'ready', label: 'status.ready' }),
+})
+
+/**
+ * Resolve status and alert presentation from Host/request facts.
+ * Offline and error states take precedence over work-in-progress and limits.
+ * @param {object} options - Host/request facts and the active translator.
+ * @returns {{alertMessage: string|null, state: string, stateLabel: string}}
+ */
+function resolveWorkbenchStatus(options) {
+  const { error, offline, pending, overLimit, status, connected, t } = options
+  const presentation = offline
+    ? STATUS_PRESENTATION.offline
+    : error !== null
+      ? STATUS_PRESENTATION.error
+      : pending
+        ? STATUS_PRESENTATION.pending
+        : overLimit
+          ? STATUS_PRESENTATION.limited
+          : status === 'cancelled'
+            ? STATUS_PRESENTATION.cancelled
+            : !connected
+              ? STATUS_PRESENTATION.connecting
+              : STATUS_PRESENTATION.ready
+  const alertMessage = error !== null ? error : offline ? t('error.offline') : null
+  return {
+    alertMessage,
+    state: presentation.state,
+    stateLabel: t(presentation.label),
+  }
+}
+
+/**
+ * Decide whether reversing the current direction would produce a no-op.
+ * Auto detect is unavailable until a translation returns a concrete source.
+ * @param {object} options - current request and language-selection state.
+ * @returns {string|null} reason key, or null when swapping works.
+ */
+function resolveLanguageSwapReason({ pending, sourceLanguage, targetLanguage, detectedSource }) {
+  if (pending) return 'swap.pending'
+  if (sourceLanguage === 'auto') {
+    if (typeof detectedSource !== 'string' || detectedSource.trim().length === 0) return 'swap.auto'
+    return detectedSource === targetLanguage ? 'swap.same' : null
+  }
+  return sourceLanguage === targetLanguage ? 'swap.same' : null
+}
+
     // Client source part: locale dictionaries, catalogs and theme-aware stylesheet.
     const NS = 'ybbmm.dsh-translation-pane'
     const PANEL_ID = 'translation-pane'
@@ -536,82 +689,6 @@ window.__ModuleLoader__.load({
       return (key) => key
     }
 
-    /** Warning codes understood by the localized glossary diagnostics. */
-    const GLOSSARY_WARNING_CODES = Object.freeze([
-      'invalid-entry',
-      'too-many-entries',
-      'duplicate-entry',
-      'conflicting-entry',
-      'overlapping-terms',
-    ])
-
-    /**
-     * Normalize plain glossary records received across the Host RPC boundary.
-     *
-     * A compatible Host normally sends validated records, but the browser
-     * boundary must tolerate partial, older or malformed snapshots. Invalid
-     * rows are skipped instead of turning a successful describe call into an
-     * apparent connection failure.
-     * @param glossary - untrusted Host glossary data.
-     * @returns portable glossary records with only supported fields.
-     */
-    function normalizeGlossaryEntries(glossary) {
-      if (!Array.isArray(glossary)) return []
-      return glossary.flatMap((entry) => {
-        if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return []
-        if (typeof entry.source !== 'string' || typeof entry.target !== 'string') return []
-        const source = entry.source.trim()
-        const target = entry.target.trim()
-        const hasControlCharacters = (value) => {
-          for (let index = 0; index < value.length; index += 1) {
-            const code = value.charCodeAt(index)
-            if (code <= 0x1f || code === 0x7f) return true
-          }
-          return false
-        }
-        if (
-          source.length === 0 ||
-          target.length === 0 ||
-          hasControlCharacters(source) ||
-          hasControlCharacters(target)
-        ) return []
-
-        const normalized = { source, target }
-        if (
-          typeof entry.sourceLanguage === 'string' &&
-          entry.sourceLanguage.trim().length > 0 &&
-          entry.sourceLanguage !== '*'
-        ) normalized.sourceLanguage = entry.sourceLanguage
-        if (
-          typeof entry.targetLanguage === 'string' &&
-          entry.targetLanguage.trim().length > 0 &&
-          entry.targetLanguage !== '*'
-        ) normalized.targetLanguage = entry.targetLanguage
-        if (entry.matchCase === true) normalized.matchCase = true
-        if (typeof entry.wholeWord === 'boolean') normalized.wholeWord = entry.wholeWord
-        if (entry.enabled === false) normalized.enabled = false
-        if (Number.isInteger(entry.priority) && entry.priority >= -1000 && entry.priority <= 1000 && entry.priority !== 0) {
-          normalized.priority = entry.priority
-        }
-        return [normalized]
-      })
-    }
-
-    /**
-     * Keep only warning records the current locale can render.
-     * @param warnings - untrusted Host warning data.
-     * @returns warning records with known localization keys.
-     */
-    function normalizeGlossaryWarnings(warnings) {
-      if (!Array.isArray(warnings)) return []
-      return warnings.filter((warning) =>
-        warning !== null &&
-        typeof warning === 'object' &&
-        !Array.isArray(warning) &&
-        GLOSSARY_WARNING_CODES.includes(warning.code),
-      ).map((warning) => ({ code: warning.code }))
-    }
-
     /**
      * Serialize a glossary into the portable, versioned JSON format.
      * @param glossary - Host glossary entries.
@@ -701,79 +778,6 @@ window.__ModuleLoader__.load({
     function diagnosticFor(failure) {
       const message = typeof failure?.message === 'string' ? failure.message : ''
       return message
-    }
-
-    /**
-     * Keep Host-advertised ids unique while preserving their first-seen order.
-     *
-     * Duplicate ids create duplicate React keys and duplicate options, while
-     * dropping non-string/blank entries keeps malformed metadata out of the UI.
-     * Unknown but non-empty ids remain supported for forward compatibility.
-     * @param ids - values advertised by the Host.
-     * @returns unique, non-empty string ids in Host order.
-     */
-    function uniqueCatalogIds(ids) {
-      if (!Array.isArray(ids)) return []
-      const seen = new Set()
-      return ids.filter((id) => {
-        if (typeof id !== 'string' || id.trim().length === 0 || seen.has(id)) return false
-        seen.add(id)
-        return true
-      })
-    }
-
-    /**
-     * Build the option list of one language select.
-     * @param ids - the language ids the Host advertises, possibly empty.
-     * @param includeAuto - whether the "Auto detect" entry is offered.
-     * @returns the option list, keeping the built-in display names.
-     */
-    function languageOptions(ids, includeAuto) {
-      const known = new Map(LANGUAGE_CATALOG.map((entry) => [entry.id, entry]))
-      const advertised = uniqueCatalogIds(ids)
-      const source = advertised.length > 0 ? advertised : LANGUAGE_CATALOG.map((entry) => entry.id)
-      const options = []
-      for (const id of source) {
-        if (id === 'auto' && !includeAuto) continue
-        options.push(known.get(id) ?? { id, label: id, zh: id })
-      }
-      // The source select always offers auto-detection, even when the Host
-      // catalog does not list it.
-      if (includeAuto && !options.some((entry) => entry.id === 'auto')) {
-        options.unshift(known.get('auto'))
-      }
-      return options
-    }
-
-    /**
-     * Build the option list of the service select.
-     * @param ids - the provider ids the active route can serve, possibly empty.
-     * @returns the option list, keeping the built-in display names.
-     */
-    function providerOptions(ids) {
-      const advertised = uniqueCatalogIds(ids)
-      if (advertised.length === 0) return PROVIDER_CATALOG.slice(0, 1)
-      const known = new Map(PROVIDER_CATALOG.map((entry) => [entry.id, entry]))
-      return advertised.map((id) => known.get(id) ?? { id, label: id, zh: id })
-    }
-
-    /**
-     * Read the Host's observed provider health, tolerating an older Host.
-     *
-     * The Host sends plain serializable data keyed by provider id, for
-     * example `{ google: { unreachable: true, until: '…' } }`. An older Host
-     * omits the key entirely, and the panel simply has no health notice.
-     * @param value - the Host's `providerHealth` field, possibly absent.
-     * @returns the health facts the panel can render, keyed by provider id.
-     */
-    function readProviderHealth(value) {
-      if (value === null || typeof value !== 'object' || Array.isArray(value)) return {}
-      const health = {}
-      for (const [provider, entry] of Object.entries(value)) {
-        if (entry === null || typeof entry !== 'object' || typeof entry.unreachable !== 'boolean') continue
-        health[provider] = { unreachable: entry.unreachable }
-      }
-      return health
     }
 
     /**
@@ -1820,66 +1824,6 @@ window.__ModuleLoader__.load({
             : null,
         ),
       )
-    }
-
-    /**
-     * Resolve the compact status, full alert copy and visual state from the
-     * current Host and request snapshot. Keep precedence in one pure function
-     * so the header and alert cannot drift apart as new states are added.
-     * @param options - Host/request facts and the active translator.
-     * @returns the current status pill and alert presentation.
-     */
-    const STATUS_PRESENTATION = Object.freeze({
-      offline: { state: 'offline', label: 'status.offline' },
-      error: { state: 'error', label: 'status.error' },
-      pending: { state: 'working', label: 'status.translating' },
-      limited: { state: 'limited', label: 'status.limited' },
-      cancelled: { state: 'cancelled', label: 'status.cancelled' },
-      connecting: { state: 'connecting', label: 'status.connecting' },
-      ready: { state: 'ready', label: 'status.ready' },
-    })
-
-    function resolveWorkbenchStatus(options) {
-      const { error, offline, pending, overLimit, status, connected, t } = options
-      // One ordered decision drives both the visual state and its spoken label.
-      // Keep offline/error above work-in-progress and input-limit states.
-      const presentation = offline
-        ? STATUS_PRESENTATION.offline
-        : error !== null
-          ? STATUS_PRESENTATION.error
-          : pending
-            ? STATUS_PRESENTATION.pending
-            : overLimit
-              ? STATUS_PRESENTATION.limited
-              : status === 'cancelled'
-                ? STATUS_PRESENTATION.cancelled
-                : !connected
-                  ? STATUS_PRESENTATION.connecting
-                  : STATUS_PRESENTATION.ready
-      const alertMessage = error !== null ? error : offline ? t('error.offline') : null
-      return {
-        alertMessage,
-        state: presentation.state,
-        stateLabel: t(presentation.label),
-      }
-    }
-
-    /**
-     * Decide whether reversing the current direction would produce a no-op.
-     *
-     * Auto detect has no effective source language until a translation returns
-     * one. Once detected, that language must differ from the target before a
-     * direction change is useful.
-     * @param options - current request and language-selection state.
-     * @returns the dictionary key for the reason, or null when swapping works.
-     */
-    function resolveLanguageSwapReason({ pending, sourceLanguage, targetLanguage, detectedSource }) {
-      if (pending) return 'swap.pending'
-      if (sourceLanguage === 'auto') {
-        if (typeof detectedSource !== 'string' || detectedSource.trim().length === 0) return 'swap.auto'
-        return detectedSource === targetLanguage ? 'swap.same' : null
-      }
-      return sourceLanguage === targetLanguage ? 'swap.same' : null
     }
 
     /**
