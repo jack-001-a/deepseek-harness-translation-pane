@@ -1731,36 +1731,39 @@ window.__ModuleLoader__.load({
      * @param options - Host/request facts and the active translator.
      * @returns the current status pill and alert presentation.
      */
+    const STATUS_PRESENTATION = Object.freeze({
+      offline: { state: 'offline', label: 'status.offline' },
+      error: { state: 'error', label: 'status.error' },
+      pending: { state: 'working', label: 'status.translating' },
+      limited: { state: 'limited', label: 'status.limited' },
+      cancelled: { state: 'cancelled', label: 'status.cancelled' },
+      connecting: { state: 'connecting', label: 'status.connecting' },
+      ready: { state: 'ready', label: 'status.ready' },
+    })
+
     function resolveWorkbenchStatus(options) {
       const { error, offline, pending, overLimit, status, connected, t } = options
+      // One ordered decision drives both the visual state and its spoken label.
+      // Keep offline/error above work-in-progress and input-limit states.
+      const presentation = offline
+        ? STATUS_PRESENTATION.offline
+        : error !== null
+          ? STATUS_PRESENTATION.error
+          : pending
+            ? STATUS_PRESENTATION.pending
+            : overLimit
+              ? STATUS_PRESENTATION.limited
+              : status === 'cancelled'
+                ? STATUS_PRESENTATION.cancelled
+                : !connected
+                  ? STATUS_PRESENTATION.connecting
+                  : STATUS_PRESENTATION.ready
       const alertMessage = error !== null ? error : offline ? t('error.offline') : null
-      const state = offline
-        ? 'offline'
-        : error !== null
-          ? 'error'
-          : pending
-            ? 'working'
-            : overLimit
-              ? 'limited'
-              : status === 'cancelled'
-                ? 'cancelled'
-                : !connected
-                  ? 'connecting'
-                  : 'ready'
-      const stateLabel = offline
-        ? t('status.offline')
-        : error !== null
-          ? t('status.error')
-          : pending
-            ? t('status.translating')
-            : overLimit
-              ? t('status.limited')
-              : status === 'cancelled'
-                ? t('status.cancelled')
-                : !connected
-                  ? t('status.connecting')
-                  : t('status.ready')
-      return { alertMessage, state, stateLabel }
+      return {
+        alertMessage,
+        state: presentation.state,
+        stateLabel: t(presentation.label),
+      }
     }
 
     /**
@@ -1796,6 +1799,29 @@ window.__ModuleLoader__.load({
       return message === null
         ? null
         : h('div', { className: 'dshTr-error', role: 'alert', title: title ?? undefined }, message)
+    }
+
+    /**
+     * Render the contextual notes that explain current format and language
+     * choices, alongside provider health/failover feedback.
+     * @param props - format mode, provider notice, swap guidance and ids.
+     * @returns the applicable workbench notices.
+     */
+    function TranslationNotices({ format, notice, swapReason, noteId, t }) {
+      const formatNote = format === 'json'
+        ? t('note.json')
+        : format === 'markdown'
+          ? t('note.markdown')
+          : null
+      return h(
+        React.Fragment,
+        null,
+        formatNote !== null ? h('p', { className: 'dshTr-note', role: 'note' }, formatNote) : null,
+        h(ProviderStatusNotice, { notice }),
+        swapReason === null
+          ? null
+          : h('p', { className: 'dshTr-note', id: noteId }, t(swapReason)),
+      )
     }
 
     /**
@@ -2120,15 +2146,7 @@ window.__ModuleLoader__.load({
           swap,
           t,
         }),
-        format === 'json'
-          ? h('p', { className: 'dshTr-note', role: 'note' }, t('note.json'))
-          : format === 'markdown'
-            ? h('p', { className: 'dshTr-note', role: 'note' }, t('note.markdown'))
-            : null,
-        h(ProviderStatusNotice, { notice }),
-        swapReason === null
-          ? null
-          : h('p', { className: 'dshTr-note', id: ids.note }, t(swapReason)),
+        h(TranslationNotices, { format, notice, swapReason, noteId: ids.note, t }),
         h(
           'div',
           { className: 'dshTr-grid', 'data-stacked': narrow ? 'true' : 'false' },

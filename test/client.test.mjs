@@ -1680,3 +1680,65 @@ test('the extracted header and alert keep offline state visible and recover on r
   )
   mounted.unmount()
 })
+
+test('format, provider and swap guidance render independently without hiding one another', async () => {
+  loadPluginState = await loadPlugin()
+  await withPreferences({ provider: 'google' }, async () => {
+    const { mounted } = mountPanel({
+      describe: {
+        ...HOST_DESCRIBE,
+        providerHealth: {
+          bing: { unreachable: false },
+          google: { unreachable: true, reason: 'translation-pane/provider-unreachable' },
+        },
+      },
+    })
+    await flushPanel()
+
+    const findFormatNote = () => findOne(
+      mounted.tree,
+      (node) => node.type === 'p' && node.props?.role === 'note' && String(node.props?.className).includes('dshTr-note'),
+      'the format guidance note',
+    )
+    const format = findOne(
+      mounted.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith('-format'),
+      'the format selector',
+    )
+    const initialFormatNote = findFormatNote()
+    assert.match(textOf(initialFormatNote), /JSON mode preserves keys/)
+    const providerNotice = findOne(
+      mounted.tree,
+      (node) => node.props?.className === 'dshTr-notice',
+      'the provider health notice',
+    )
+    assert.equal(providerNotice.props.role, 'status')
+    assert.match(textOf(providerNotice), /Google service is unavailable/)
+    const swapReason = findOne(
+      mounted.tree,
+      (node) => node.type === 'p' && node.props?.id && String(node.props?.className).includes('dshTr-note') && node.props?.role !== 'note',
+      'the language swap explanation',
+    )
+    assert.match(textOf(swapReason), /Auto detect/)
+
+    format.props.onChange({ target: { value: 'markdown' } })
+    await flushPanel()
+    assert.match(textOf(findFormatNote()), /Markdown mode translates prose/)
+    assert.equal(findAll(mounted.tree, (node) => node.props?.className === 'dshTr-notice').length, 1)
+
+    const source = findOne(
+      mounted.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith('-source'),
+      'the source language selector',
+    )
+    source.props.onChange({ target: { value: 'en' } })
+    await flushPanel()
+    assert.equal(
+      findAll(mounted.tree, (node) => node.type === 'p' && node.props?.id && String(node.props?.className).includes('dshTr-note') && node.props?.role !== 'note').length,
+      0,
+      'selecting a concrete source language should remove swap-only guidance',
+    )
+    assert.equal(findAll(mounted.tree, (node) => node.props?.className === 'dshTr-notice').length, 1)
+    mounted.unmount()
+  })
+})
