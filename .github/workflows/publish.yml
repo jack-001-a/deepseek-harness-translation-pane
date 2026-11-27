@@ -5,6 +5,7 @@ name: publish
 # filename and repository, so neither may be renamed without reconfiguring it.
 on:
   push:
+    branches: [main]
     tags:
       - 'v*'
 
