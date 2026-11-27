@@ -154,6 +154,17 @@ test('Markdown segmentation protects multiline and unclosed HTML comments', () =
   assert.ok(protectedSource.includes('{{runtime.value}}'))
   assert.equal(prose.includes('hidden annotation'), false)
 
+  const alternateClose = [
+    'Translate before alternate comment.',
+    '<!-- alternate HTML comment terminator --!>',
+    'Translate after alternate comment.',
+  ].join('\\n')
+  const alternateSegments = markdownSegments(alternateClose)
+  assert.equal(alternateSegments.map((segment) => segment.text).join(''), alternateClose)
+  const alternateProse = alternateSegments.filter((segment) => segment.translate).map((segment) => segment.text).join('')
+  assert.match(alternateProse, /Translate after alternate comment/)
+  assert.equal(alternateProse.includes('alternate HTML comment terminator'), false)
+
   const unclosed = 'Translate this.\n<!-- unfinished comment\nprivate annotation'
   const unclosedSegments = markdownSegments(unclosed)
   assert.equal(unclosedSegments.map((segment) => segment.text).join(''), unclosed)
