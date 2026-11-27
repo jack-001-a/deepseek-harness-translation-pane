@@ -388,7 +388,7 @@ window.__ModuleLoader__.load({
 .dshTr-glossarySummary:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 4px; border-radius: 6px; }
 .dshTr-glossarySummary::after { content: '+'; flex: none; color: var(--dsw-alias-label-secondary); font-size: 20px; line-height: 20px; }
 .dshTr-glossaryDetails[open] > .dshTr-glossarySummary::after { content: '−'; }
-.dshTr-glossaryHead { flex: 1 1 auto; }
+.dshTr-glossaryHead { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; flex: 1 1 auto; }
 .dshTr-glossaryArea { min-height: 150px; border-radius: 10px; font-size: 12px; line-height: 19px; }
 .dshTr-import { gap: 8px; border-radius: 10px; }
 .dshTr-empty {
@@ -690,8 +690,9 @@ window.__ModuleLoader__.load({
       } catch {
         // Fall through to the legacy path rather than lose the copy.
       }
+      let area
       try {
-        const area = document.createElement('textarea')
+        area = document.createElement('textarea')
         area.value = text
         area.setAttribute('readonly', '')
         area.style.position = 'fixed'
@@ -700,11 +701,13 @@ window.__ModuleLoader__.load({
         document.body.appendChild(area)
         area.select()
         area.setSelectionRange(0, text.length)
-        const copied = document.execCommand('copy')
-        document.body.removeChild(area)
-        return copied
+        return document.execCommand('copy')
       } catch {
         return false
+      } finally {
+        // execCommand may throw after the node was attached; never leak it into
+        // the Host document, including when the legacy clipboard API fails.
+        if (area?.parentNode) area.parentNode.removeChild(area)
       }
     }
 
@@ -854,6 +857,7 @@ window.__ModuleLoader__.load({
       const [glossaryDraft, setGlossaryDraft] = React.useState('')
       const [glossaryBusy, setGlossaryBusy] = React.useState(false)
       const [glossaryMessage, setGlossaryMessage] = React.useState(null)
+      const [glossaryOpen, setGlossaryOpen] = React.useState(false)
       const glossaryDraftDirtyRef = React.useRef(false)
 
       // The request sequence is the reliable guard against a stale answer:
@@ -992,6 +996,12 @@ window.__ModuleLoader__.load({
       React.useEffect(() => {
         writePreferences({ sourceLanguage, targetLanguage, provider, format })
       }, [sourceLanguage, targetLanguage, provider, format])
+
+      // Surface terminology problems without making advanced configuration
+      // consume the default workbench space.
+      React.useEffect(() => {
+        if (host.glossaryWarnings.length > 0) setGlossaryOpen(true)
+      }, [host.glossaryWarnings.length])
 
       React.useEffect(
         () => () => {
@@ -1164,7 +1174,11 @@ window.__ModuleLoader__.load({
       const notice = mixedNotice ?? failoverNotice ?? healthNotice
       // The meta line names every service that answered, not just the first.
       const servedLabel =
-        mixedServed === null ? providerLabel : mixedServed.map(providerName).join(' + ')
+        mixedServed !== null
+          ? mixedServed.map(providerName).join(' + ')
+          : typeof result?.provider === 'string' && result.provider.length > 0 && result.provider !== 'none'
+            ? providerName(result.provider)
+            : providerLabel
 
       /**
        * Explain why the swap cannot act, when it cannot.
@@ -1724,14 +1738,22 @@ window.__ModuleLoader__.load({
           { className: 'dshTr-glossary', 'aria-labelledby': ids.glossary },
           h(
             'details',
-            { className: 'dshTr-glossaryDetails', open: host.glossaryWarnings.length > 0 },
+            {
+              className: 'dshTr-glossaryDetails',
+              open: glossaryOpen,
+              onToggle: (event) => setGlossaryOpen(event.currentTarget.open),
+            },
             h(
               'summary',
               { className: 'dshTr-glossarySummary' },
               h(
-                'div',
+                'span',
                 { className: 'dshTr-glossaryHead' },
-            h('h3', { className: 'dshTr-glossaryTitle', id: ids.glossary }, t('glossary.title')),
+                h(
+                  'span',
+                  { className: 'dshTr-glossaryTitle', id: ids.glossary, role: 'heading', 'aria-level': 3 },
+                  t('glossary.title'),
+                ),
                 h('span', { className: 'dshTr-glossaryCount' }, String(host.glossary.length)),
               ),
             ),

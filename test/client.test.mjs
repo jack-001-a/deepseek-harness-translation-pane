@@ -762,6 +762,9 @@ test('a failover result names the served service in a status notice', async () =
     )
     const region = findOne(mounted.tree, (node) => node.props?.role === 'region', 'the result region')
     assert.equal(textOf(region), '你好')
+    const meta = findOne(mounted.tree, (node) => node.props?.className === 'dshTr-meta', 'the result metadata')
+    assert.match(textOf(meta), /Service: Bing/, 'metadata must name the provider that actually served the result')
+    assert.doesNotMatch(textOf(meta), /Service: Google/)
   })
 })
 
@@ -1118,5 +1121,46 @@ test('the workbench has deliberate empty/loading states and a progressive glossa
   await flushPanel()
   const finalResult = findOne(mounted.tree, (node) => node.props?.role === 'region', 'the completed result region')
   assert.equal(textOf(finalResult), '再次翻译')
+  mounted.unmount()
+})
+
+test('the glossary disclosure uses valid summary content and stays user-toggleable', async () => {
+  loadPluginState = await loadPlugin()
+  const { mounted } = mountPanel()
+  await flushPanel()
+
+  const details = findOne(
+    mounted.tree,
+    (node) => node.type === 'details' && node.props?.className === 'dshTr-glossaryDetails',
+    'the glossary disclosure',
+  )
+  assert.equal(details.props.open, false)
+  const summary = findOne(details, (node) => node.type === 'summary', 'the glossary summary')
+  const summaryChildren = summary.children.filter((node) => node && typeof node === 'object')
+  assert.ok(summaryChildren.every((node) => node.type === 'span'), 'summary content must remain phrasing markup')
+  const heading = findOne(
+    summary,
+    (node) => node.props?.role === 'heading' && node.props?.['aria-level'] === 3,
+    'the accessible glossary heading',
+  )
+  assert.equal(textOf(heading), 'Terminology glossary')
+
+  details.props.onToggle({ currentTarget: { open: true } })
+  await flushPanel()
+  let currentDetails = findOne(
+    mounted.tree,
+    (node) => node.type === 'details' && node.props?.className === 'dshTr-glossaryDetails',
+    'the expanded glossary disclosure',
+  )
+  assert.equal(currentDetails.props.open, true)
+
+  currentDetails.props.onToggle({ currentTarget: { open: false } })
+  await flushPanel()
+  currentDetails = findOne(
+    mounted.tree,
+    (node) => node.type === 'details' && node.props?.className === 'dshTr-glossaryDetails',
+    'the collapsed glossary disclosure',
+  )
+  assert.equal(currentDetails.props.open, false)
   mounted.unmount()
 })
