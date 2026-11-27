@@ -1381,6 +1381,144 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Render the editable source card without owning translation state.
+     * @param props - source value, validity, labels and event callbacks.
+     * @returns the source editor card.
+     */
+    function TranslationSourceCard(props) {
+      const { ids, source, pending, overLimit, onClear, onChange, onKeyDown, t } = props
+      return h(
+        'div',
+        { className: 'dshTr-card' },
+        h(
+          'div',
+          { className: 'dshTr-cardHead' },
+          h('span', { className: 'dshTr-cardTitle' }, t('label.source')),
+          h(
+            'div',
+            { className: 'dshTr-cardTools' },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dshTr-ghost',
+                disabled: pending || source.length === 0,
+                onClick: onClear,
+              },
+              t('action.clear'),
+            ),
+          ),
+        ),
+        h('textarea', {
+          className: 'dshTr-area',
+          value: source,
+          placeholder: t('placeholder.source'),
+          spellCheck: false,
+          // The text may be RTL, so the editor follows its own content.
+          dir: 'auto',
+          'aria-label': t('label.source'),
+          'aria-describedby': ids.counter,
+          // Over-limit is a validity state, not just a red number: a
+          // screen reader must hear that the text cannot be sent.
+          'aria-invalid': overLimit ? 'true' : undefined,
+          onChange,
+          onKeyDown,
+        }),
+      )
+    }
+
+    /**
+     * Render the result card and its deliberate empty/loading states.
+     * @param props - result text, request state, clipboard feedback and labels.
+     * @returns the accessible translation result card.
+     */
+    function TranslationResultCard(props) {
+      const { output, pending, copied, onCopy, t } = props
+      return h(
+        'div',
+        { className: 'dshTr-card' },
+        h(
+          'div',
+          { className: 'dshTr-cardHead' },
+          h('span', { className: 'dshTr-cardTitle' }, t('label.result')),
+          h(
+            'div',
+            { className: 'dshTr-cardTools' },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dshTr-ghost',
+                disabled: output.length === 0,
+                onClick: () => {
+                  void onCopy()
+                },
+              },
+              copied ? t('action.copied') : t('action.copy'),
+            ),
+          ),
+        ),
+        h(
+          'div',
+          {
+            className: 'dshTr-out',
+            'data-empty': output.length === 0 ? 'true' : 'false',
+            // A region with a live role announces the new translation and
+            // is not announced as an editable field.
+            role: 'region',
+            'aria-label': t('label.result'),
+            'aria-live': 'polite',
+            // Announce the finished translation as one sentence instead of
+            // a stream of partial updates.
+            'aria-atomic': 'true',
+            'aria-busy': pending,
+            // The translation may be in an RTL language.
+            dir: 'auto',
+            // A scrollable region must be reachable with the keyboard.
+            tabIndex: 0,
+          },
+          pending
+            ? h(
+                'div',
+                { className: 'dshTr-loading' },
+                h('span', { className: 'dshTr-spinner', 'aria-hidden': true }),
+                h('span', null, t('action.translating')),
+              )
+            : output.length > 0
+              ? output
+              : h(
+                  'div',
+                  { className: 'dshTr-empty' },
+                  h(
+                    'span',
+                    { className: 'dshTr-emptyIcon', 'aria-hidden': true },
+                    h(
+                      'svg',
+                      {
+                        className: 'dshTr-icon',
+                        width: 24,
+                        height: 24,
+                        viewBox: '0 0 24 24',
+                        fill: 'none',
+                        stroke: 'currentColor',
+                        strokeWidth: 1.6,
+                        strokeLinecap: 'round',
+                        strokeLinejoin: 'round',
+                      },
+                      h('circle', { cx: 12, cy: 12, r: 8.5 }),
+                      h('path', { d: 'M3.8 12h16.4' }),
+                      h('path', { d: 'M12 3.5c2.1 2.3 3.1 5.1 3.1 8.5s-1 6.2-3.1 8.5' }),
+                      h('path', { d: 'M12 3.5c-2.1 2.3-3.1 5.1-3.1 8.5s1 6.2 3.1 8.5' }),
+                    ),
+                  ),
+                  h('strong', { className: 'dshTr-emptyTitle' }, t('empty.title')),
+                  h('span', { className: 'dshTr-emptyDescription' }, t('empty.description')),
+                ),
+        ),
+      )
+    }
+
+    /**
      * The translation workbench.
      * @param props - the slot props, carrying the bound translator.
      * @returns the workbench element.
@@ -1621,6 +1759,32 @@ window.__ModuleLoader__.load({
         resetTranslation()
       }, [resetTranslation])
 
+      /**
+       * Editing submitted text cancels any active request and invalidates its result.
+       */
+      const handleSourceChange = React.useCallback((event) => {
+        if (pending) cancel()
+        setSource(event.target.value)
+        resetTranslation()
+      }, [cancel, pending, resetTranslation, setSource])
+
+      /**
+       * Keep keyboard shortcuts at the workbench boundary, next to request state.
+       */
+      const handleSourceKeyDown = React.useCallback((event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+          event.preventDefault()
+          void run({ source, sourceLanguage, targetLanguage, provider, format })
+          return
+        }
+        if (event.key === 'Escape' && pending) {
+          // Escape cancels the running request instead of reaching the shell.
+          event.preventDefault()
+          event.stopPropagation()
+          cancel()
+        }
+      }, [cancel, format, pending, provider, run, source, sourceLanguage, targetLanguage])
+
       // The status pill carries a short state label; the alert region carries
       // the full sentence, so the pill is never the only signal.
       const alertMessage = error !== null ? error : host.offline ? t('error.offline') : null
@@ -1708,146 +1872,23 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { className: 'dshTr-grid', 'data-stacked': narrow ? 'true' : 'false' },
-          h(
-            'div',
-            { className: 'dshTr-card' },
-            h(
-              'div',
-              { className: 'dshTr-cardHead' },
-              h('span', { className: 'dshTr-cardTitle' }, t('label.source')),
-              h(
-                'div',
-                { className: 'dshTr-cardTools' },
-                h(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'dshTr-ghost',
-                    disabled: pending || source.length === 0,
-                    onClick: clear,
-                  },
-                  t('action.clear'),
-                ),
-              ),
-            ),
-            h('textarea', {
-              className: 'dshTr-area',
-              value: source,
-              placeholder: t('placeholder.source'),
-              spellCheck: false,
-              // The text may be RTL, so the editor follows its own content.
-              dir: 'auto',
-              'aria-label': t('label.source'),
-              'aria-describedby': ids.counter,
-              // Over-limit is a validity state, not just a red number: a
-              // screen reader must hear that the text cannot be sent.
-              'aria-invalid': overLimit ? 'true' : undefined,
-              onChange: (event) => {
-                // Editing the submitted text invalidates its response. Abort
-                // the Host request and clear the previous answer so it cannot
-                // appear beside text that was never translated.
-                if (pending) cancel()
-                setSource(event.target.value)
-                resetTranslation()
-              },
-              onKeyDown: (event) => {
-                if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-                  event.preventDefault()
-                  void run({ source, sourceLanguage, targetLanguage, provider, format })
-                  return
-                }
-                if (event.key === 'Escape' && pending) {
-                  // Escape cancels the running request instead of reaching the
-                  // shell's own Escape handling.
-                  event.preventDefault()
-                  event.stopPropagation()
-                  cancel()
-                }
-              },
-            }),
-          ),
-          h(
-            'div',
-            { className: 'dshTr-card' },
-            h(
-              'div',
-              { className: 'dshTr-cardHead' },
-              h('span', { className: 'dshTr-cardTitle' }, t('label.result')),
-              h(
-                'div',
-                { className: 'dshTr-cardTools' },
-                h(
-                  'button',
-                  {
-                    type: 'button',
-                    className: 'dshTr-ghost',
-                    disabled: output.length === 0,
-                    onClick: () => {
-                      void copy()
-                    },
-                  },
-                  copied ? t('action.copied') : t('action.copy'),
-                ),
-              ),
-            ),
-            h(
-              'div',
-              {
-                className: 'dshTr-out',
-                'data-empty': output.length === 0 ? 'true' : 'false',
-                // A region with a live role announces the new translation and
-                // is not announced as an editable field.
-                role: 'region',
-                'aria-label': t('label.result'),
-                'aria-live': 'polite',
-                // Announce the finished translation as one sentence instead of
-                // a stream of partial updates.
-                'aria-atomic': 'true',
-                'aria-busy': pending,
-                // The translation may be in an RTL language.
-                dir: 'auto',
-                // A scrollable region must be reachable with the keyboard.
-                tabIndex: 0,
-              },
-              pending
-                ? h(
-                    'div',
-                    { className: 'dshTr-loading' },
-                    h('span', { className: 'dshTr-spinner', 'aria-hidden': true }),
-                    h('span', null, t('action.translating')),
-                  )
-                : output.length > 0
-                  ? output
-                  : h(
-                      'div',
-                      { className: 'dshTr-empty' },
-                      h(
-                        'span',
-                        { className: 'dshTr-emptyIcon', 'aria-hidden': true },
-                        h(
-                          'svg',
-                          {
-                            className: 'dshTr-icon',
-                            width: 24,
-                            height: 24,
-                            viewBox: '0 0 24 24',
-                            fill: 'none',
-                            stroke: 'currentColor',
-                            strokeWidth: 1.6,
-                            strokeLinecap: 'round',
-                            strokeLinejoin: 'round',
-                          },
-                          h('circle', { cx: 12, cy: 12, r: 8.5 }),
-                          h('path', { d: 'M3.8 12h16.4' }),
-                          h('path', { d: 'M12 3.5c2.1 2.3 3.1 5.1 3.1 8.5s-1 6.2-3.1 8.5' }),
-                          h('path', { d: 'M12 3.5c-2.1 2.3-3.1 5.1-3.1 8.5s1 6.2 3.1 8.5' }),
-                        ),
-                      ),
-                      h('strong', { className: 'dshTr-emptyTitle' }, t('empty.title')),
-                      h('span', { className: 'dshTr-emptyDescription' }, t('empty.description')),
-                    ),
-            ),
-          ),
+          h(TranslationSourceCard, {
+            ids,
+            source,
+            pending,
+            overLimit,
+            onClear: clear,
+            onChange: handleSourceChange,
+            onKeyDown: handleSourceKeyDown,
+            t,
+          }),
+          h(TranslationResultCard, {
+            output,
+            pending,
+            copied,
+            onCopy: copy,
+            t,
+          }),
         ),
         alertMessage !== null
           ? h(

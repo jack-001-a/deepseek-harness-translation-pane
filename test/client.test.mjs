@@ -1513,3 +1513,47 @@ test('language and provider controls preserve swap accessibility and direction c
   assert.equal(currentTarget.props.value, 'en')
   mounted.unmount()
 })
+
+test('source editor shortcuts submit and cancel through parent-owned request state', async () => {
+  loadPluginState = await loadPlugin()
+  let submitted
+  let requestSignal
+  const { mounted } = mountPanel({
+    translate: (args, signal) => {
+      submitted = args
+      requestSignal = signal
+      return new Promise(() => {})
+    },
+  })
+  await flushPanel()
+  await typeSource(mounted, 'shortcut request')
+
+  let submitPrevented = false
+  sourceArea(mounted.tree).props.onKeyDown({
+    ctrlKey: true,
+    key: 'Enter',
+    preventDefault: () => { submitPrevented = true },
+    stopPropagation: () => {},
+  })
+  await flushPanel()
+
+  assert.equal(submitPrevented, true)
+  assert.equal(submitted.text, 'shortcut request')
+  assert.ok(requestSignal, 'the keyboard shortcut must use the Host translation request')
+
+  let cancelPrevented = false
+  let cancelStopped = false
+  sourceArea(mounted.tree).props.onKeyDown({
+    ctrlKey: false,
+    metaKey: false,
+    key: 'Escape',
+    preventDefault: () => { cancelPrevented = true },
+    stopPropagation: () => { cancelStopped = true },
+  })
+  await flushPanel()
+
+  assert.equal(cancelPrevented, true)
+  assert.equal(cancelStopped, true)
+  assert.equal(requestSignal.aborted, true, 'Escape must abort the in-flight request')
+  mounted.unmount()
+})
