@@ -1024,6 +1024,53 @@ test('storage events synchronize preferences across tabs without echoing the wri
   else globalThis.removeEventListener = previousRemove
 })
 
+test('reopening the panel rereads cross-tab preferences changed while it was closed', async () => {
+  loadPluginState = await loadPlugin()
+  await withPreferences({
+    sourceLanguage: 'auto',
+    targetLanguage: 'zh-Hans',
+    provider: 'bing',
+    format: 'text',
+  }, async (store) => {
+    const { registrations, dictionaries } = applyPlugin(loadPluginState.plugin, 'en')
+    const table = dictionaries[NS].en
+    const t = (key) => table[key] ?? key
+    const page = registrations.main.component
+    const first = mount(page, { t })
+    await flushPanel()
+    const source = findOne(
+      first.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith('-source'),
+      'the first source selector',
+    )
+    source.props.onChange({ target: { value: 'fr' } })
+    await flushPanel()
+    first.unmount()
+
+    // Another tab changes localStorage while this tab has no mounted panel
+    // and therefore no storage listener.
+    store.set(STORAGE_KEY, JSON.stringify({
+      sourceLanguage: 'de',
+      targetLanguage: 'ja',
+      provider: 'google',
+      format: 'markdown',
+    }))
+
+    const reopened = mount(page, { t })
+    await flushPanel()
+    const value = (suffix) => findOne(
+      reopened.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith(suffix),
+      `the reopened ${suffix} selector`,
+    ).props.value
+    assert.equal(value('-source'), 'de')
+    assert.equal(value('-target'), 'ja')
+    assert.equal(value('-service'), 'google')
+    assert.equal(value('-format'), 'markdown')
+    reopened.unmount()
+  })
+})
+
 test('simultaneous panels share preference changes without overwriting other fields', async () => {
   loadPluginState = await loadPlugin()
   await withPreferences({
@@ -1111,6 +1158,46 @@ test('multiple panels share one Host description and one connection subscription
   resolveDescription({ ...HOST_DESCRIBE, maxTextChars: 777 })
   await flushPanel()
   assert.equal(descriptions, 1, 'a late completion must not trigger a replacement request')
+})
+
+test('reopening the last panel discards stale Host metadata and reads current connection state', async () => {
+  loadPluginState = await loadPlugin()
+  let descriptions = 0
+  const { registrations, dictionaries, setConnectionState, connectionListenerCount } = applyPlugin(
+    loadPluginState.plugin,
+    'en',
+    {
+      describe: () => {
+        descriptions += 1
+        return { ...HOST_DESCRIBE, maxTextChars: 1234 }
+      },
+    },
+  )
+  const table = dictionaries[NS].en
+  const t = (key, params) => {
+    const template = table[key] ?? key
+    if (!params) return template
+    return template.replace(/\{(\w+)\}/g, (match, name) =>
+      name in params ? String(params[name]) : match,
+    )
+  }
+  const page = registrations.main.component
+  const first = mount(page, { t })
+  await flushPanel()
+  assert.equal(descriptions, 1)
+  assert.match(textOf(first.tree), /1234/)
+  first.unmount()
+  assert.equal(connectionListenerCount(), 0)
+
+  // The Host disconnects while every panel is closed, so there is no
+  // connection listener to update the old snapshot.
+  setConnectionState('disconnected')
+  const reopened = mount(page, { t })
+  await flushPanel()
+  assert.equal(descriptions, 1, 'an already-disconnected Host needs no describe RPC')
+  assert.match(textOf(reopened.tree), /Offline/)
+  assert.doesNotMatch(textOf(reopened.tree), /1234/, 'stale metadata must not survive the closed period')
+  reopened.unmount()
 })
 
 test('shared Host reconnect performs one refresh and updates every mounted panel', async () => {

@@ -81,3 +81,8 @@ Host metadata is stored once per plugin factory and broadcast to each mounted pa
 
 
 Post-translation metadata reads supersede an older initial description, while simultaneous refreshes triggered by sibling panels share the same fresh request. This preserves the latest-result-wins guarantee without multiplying requests after a multi-panel translation completes.
+
+
+### Reopening after all panels close
+
+No browser storage or Host connection listener remains attached while there are no mounted panels. On the next mount, available localStorage is re-read so external tab changes made during the closed period are not hidden by an in-memory snapshot; when storage access is unavailable, the last in-memory preferences are retained. The last Host subscriber resets the shared metadata snapshot after aborting work and removing the connection listener, so a reopened panel always starts from a neutral snapshot and reconciles against the current connection state.

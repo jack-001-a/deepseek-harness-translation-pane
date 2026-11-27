@@ -1010,6 +1010,20 @@ function resolveProviderPresentation(options) {
     function getSharedPreferences() {
       if (sharedPreferencesSnapshot === null) {
         sharedPreferencesSnapshot = normalizePreferences(readPreferences(), PROVIDER_CATALOG)
+      } else if (preferenceSubscribers.size === 0) {
+        // No storage listener is retained while every panel is closed. Read
+        // the latest persisted value on the next mount, but preserve the
+        // in-memory snapshot when storage is unavailable or access is denied.
+        try {
+          const storage = globalThis.localStorage
+          if (typeof storage?.getItem === 'function') {
+            const raw = storage.getItem(STORAGE_KEY)
+            const saved = typeof raw === 'string' ? JSON.parse(raw) : {}
+            sharedPreferencesSnapshot = normalizePreferences(saved, PROVIDER_CATALOG)
+          }
+        } catch {
+          // Keep the last in-memory value when localStorage cannot be read.
+        }
       }
       return sharedPreferencesSnapshot
     }
@@ -1124,18 +1138,21 @@ function resolveProviderPresentation(options) {
      * factory. Keep one connection subscription and one in-flight metadata
      * request for the whole workbench, not one per visible panel.
      */
-    let sharedHostSnapshot = {
-      connected: false,
-      offline: false,
-      route: null,
-      providers: [],
-      languages: [],
-      limit: null,
-      providerHealth: {},
-      failoverCapable: false,
-      glossary: [],
-      glossaryWarnings: [],
+    function emptySharedHostSnapshot() {
+      return {
+        connected: false,
+        offline: false,
+        route: null,
+        providers: [],
+        languages: [],
+        limit: null,
+        providerHealth: {},
+        failoverCapable: false,
+        glossary: [],
+        glossaryWarnings: [],
+      }
     }
+    let sharedHostSnapshot = emptySharedHostSnapshot()
     const hostSubscribers = new Set()
     let hostConnectionUnsubscribe = null
     let hostConnectionSnapshot = undefined
@@ -1288,6 +1305,10 @@ function resolveProviderPresentation(options) {
         hostConnectionUnsubscribe = null
         hostConnectionSnapshot = undefined
         cancelSharedHostDescription()
+        // The connection subscription is intentionally absent while no view
+        // is mounted. Do not carry a possibly stale Host snapshot into the
+        // next opening; its first subscriber will read the current connection.
+        sharedHostSnapshot = emptySharedHostSnapshot()
       }
     }
 
