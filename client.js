@@ -1120,47 +1120,62 @@ function resolveProviderPresentation(options) {
     }
 
     /**
-     * Own the Host connection snapshot and its refresh lifecycle.
-     *
-     * A reconnect can change provider availability, limits and glossary
-     * warnings. One sequence-guarded request is authoritative at a time, and
-     * both the RPC and its retry delay are cancelled when the hook unmounts.
-     * @param options - the glossary draft setter and its dirty-state ref.
-     * @returns the current Host snapshot and a refresh callback.
+     * The Host description is shared by every view mounted from this plugin
+     * factory. Keep one connection subscription and one in-flight metadata
+     * request for the whole workbench, not one per visible panel.
      */
-    function useHostConnection({ setGlossaryDraft, glossaryDraftDirtyRef }) {
-      const [host, setHost] = React.useState({
-        connected: false,
-        offline: false,
-        route: null,
-        providers: [],
-        languages: [],
-        limit: null,
-        providerHealth: {},
-        failoverCapable: false,
-        glossary: [],
-        glossaryWarnings: [],
-      })
-      const describeSeq = React.useRef(0)
-      const describeAbortRef = React.useRef(null)
-      const mountedRef = React.useRef(true)
-      const connectionSnapshotRef = React.useRef(undefined)
+    let sharedHostSnapshot = {
+      connected: false,
+      offline: false,
+      route: null,
+      providers: [],
+      languages: [],
+      limit: null,
+      providerHealth: {},
+      failoverCapable: false,
+      glossary: [],
+      glossaryWarnings: [],
+    }
+    const hostSubscribers = new Set()
+    let hostConnectionUnsubscribe = null
+    let hostConnectionSnapshot = undefined
+    let hostDescribeSeq = 0
+    let hostDescribeAbortRef = null
+    let hostDescribePromise = null
 
-      const describeHost = React.useCallback(async () => {
-        if (!mountedRef.current) return false
-        const seq = ++describeSeq.current
-        describeAbortRef.current?.abort()
-        const controller = new AbortController()
-        describeAbortRef.current = controller
-        const isCurrent = () =>
-          mountedRef.current && seq === describeSeq.current && !controller.signal.aborted
+    function publishSharedHost(next) {
+      sharedHostSnapshot = typeof next === 'function' ? next(sharedHostSnapshot) : next
+      for (const subscriber of [...hostSubscribers]) subscriber(sharedHostSnapshot)
+      return sharedHostSnapshot
+    }
+
+    function cancelSharedHostDescription() {
+      hostDescribeSeq += 1
+      hostDescribeAbortRef?.abort()
+      hostDescribeAbortRef = null
+      hostDescribePromise = null
+    }
+
+    function refreshSharedHost() {
+      if (hostSubscribers.size === 0) return Promise.resolve(false)
+      if (hostDescribePromise !== null) return hostDescribePromise
+
+      const seq = ++hostDescribeSeq
+      const controller = new AbortController()
+      hostDescribeAbortRef = controller
+      const isCurrent = () =>
+        hostSubscribers.size > 0 &&
+        seq === hostDescribeSeq &&
+        !controller.signal.aborted
+
+      const request = (async () => {
         try {
           for (let attempt = 0; attempt <= DESCRIBE_RETRY_DELAYS_MS.length; attempt += 1) {
             if (!isCurrent()) return false
             try {
               const value = await callHost(ctx, 'describe', {}, controller.signal)
               if (!isCurrent()) return false
-              setHost({
+              publishSharedHost({
                 connected: true,
                 offline: false,
                 route: typeof value?.route === 'string' ? value.route : null,
@@ -1175,9 +1190,6 @@ function resolveProviderPresentation(options) {
                 glossary: normalizeGlossaryEntries(value?.glossary),
                 glossaryWarnings: normalizeGlossaryWarnings(value?.glossaryWarnings),
               })
-              if (!glossaryDraftDirtyRef.current) {
-                setGlossaryDraft(glossaryJson(value?.glossary))
-              }
               return true
             } catch {
               if (!isCurrent()) return false
@@ -1202,56 +1214,92 @@ function resolveProviderPresentation(options) {
             }
           }
           if (!isCurrent()) return false
-          setHost((previous) => ({ ...previous, connected: false, offline: carrierUnreachable() }))
+          publishSharedHost((previous) => ({
+            ...previous,
+            connected: false,
+            offline: carrierUnreachable(),
+          }))
           return false
         } finally {
-          if (describeAbortRef.current === controller) describeAbortRef.current = null
+          if (hostDescribeAbortRef === controller) hostDescribeAbortRef = null
+          if (hostDescribePromise === request) hostDescribePromise = null
         }
-      }, [])
+      })()
+      hostDescribePromise = request
+      return request
+    }
+
+    function onSharedConnectionChange(state) {
+      const snapshot = state.getSnapshot?.()
+      if (Object.is(snapshot, hostConnectionSnapshot)) return
+      hostConnectionSnapshot = snapshot
+
+      if (snapshot === 'connected') {
+        void refreshSharedHost()
+        return
+      }
+      if (snapshot === 'disconnected' || snapshot === 'connecting') {
+        cancelSharedHostDescription()
+        publishSharedHost((previous) => ({
+          ...previous,
+          connected: false,
+          offline: snapshot === 'disconnected',
+        }))
+      }
+    }
+
+    function subscribeSharedHost(subscriber) {
+      hostSubscribers.add(subscriber)
+      subscriber(sharedHostSnapshot)
+
+      if (hostSubscribers.size === 1) {
+        const state = optionalService(ctx, 'connection')?.state
+        hostConnectionSnapshot = state?.getSnapshot?.()
+        if (typeof state?.subscribe === 'function') {
+          hostConnectionUnsubscribe = state.subscribe(() => onSharedConnectionChange(state))
+        }
+        if (hostConnectionSnapshot === 'disconnected' || hostConnectionSnapshot === 'connecting') {
+          publishSharedHost((previous) => ({
+            ...previous,
+            connected: false,
+            offline: hostConnectionSnapshot === 'disconnected',
+          }))
+        } else {
+          void refreshSharedHost()
+        }
+      }
+
+      return () => {
+        hostSubscribers.delete(subscriber)
+        if (hostSubscribers.size > 0) return
+        hostConnectionUnsubscribe?.()
+        hostConnectionUnsubscribe = null
+        hostConnectionSnapshot = undefined
+        cancelSharedHostDescription()
+      }
+    }
+
+    function useHostConnection({ setGlossaryDraft, glossaryDraftDirtyRef }) {
+      const [host, setHost] = React.useState(sharedHostSnapshot)
+      const mountedRef = React.useRef(true)
+      const describeHost = React.useCallback(() => refreshSharedHost(), [])
 
       React.useEffect(() => {
         mountedRef.current = true
+        const sync = (snapshot) => {
+          setHost(snapshot)
+          if (!glossaryDraftDirtyRef.current) {
+            setGlossaryDraft(glossaryJson(snapshot.glossary))
+          }
+        }
+        const unsubscribe = subscribeSharedHost(sync)
         return () => {
           mountedRef.current = false
-          describeSeq.current += 1
-          describeAbortRef.current?.abort()
-          describeAbortRef.current = null
+          unsubscribe()
         }
       }, [])
 
-      React.useEffect(() => {
-        void describeHost()
-      }, [describeHost])
-
-      React.useEffect(() => {
-        const state = optionalService(ctx, 'connection')?.state
-        if (typeof state?.subscribe !== 'function') return undefined
-        // Metadata notifications can arrive without a connection transition.
-        // Only a real snapshot change should start or invalidate a Host read.
-        connectionSnapshotRef.current = state.getSnapshot?.()
-        return state.subscribe(() => {
-          const snapshot = state.getSnapshot?.()
-          if (Object.is(snapshot, connectionSnapshotRef.current)) return
-          connectionSnapshotRef.current = snapshot
-
-          if (snapshot === 'connected') {
-            void describeHost()
-            return
-          }
-          if (snapshot === 'disconnected' || snapshot === 'connecting') {
-            describeSeq.current += 1
-            describeAbortRef.current?.abort()
-            describeAbortRef.current = null
-            setHost((previous) => ({
-              ...previous,
-              connected: false,
-              offline: snapshot === 'disconnected',
-            }))
-          }
-        })
-      }, [describeHost])
-
-      return { host, setHost, describeHost, mountedRef }
+      return { host, setHost: publishSharedHost, describeHost, mountedRef }
     }
 
     /**

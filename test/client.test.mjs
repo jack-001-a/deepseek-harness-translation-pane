@@ -176,6 +176,8 @@ function applyPlugin(plugin, locale, options = {}) {
   const describe = options.describe ?? HOST_DESCRIBE
   const translate = options.translate ?? (() => ({ text: '' }))
   const stateListeners = new Set()
+  let stateSubscribeCalls = 0
+  let stateUnsubscribeCalls = 0
   let stateSnapshot = options.connectionState ?? 'connected'
   const services = {
     locale: {
@@ -191,8 +193,12 @@ function applyPlugin(plugin, locale, options = {}) {
       state: {
         getSnapshot: () => stateSnapshot,
         subscribe: (listener) => {
+          stateSubscribeCalls += 1
           stateListeners.add(listener)
-          return () => stateListeners.delete(listener)
+          return () => {
+            stateUnsubscribeCalls += 1
+            stateListeners.delete(listener)
+          }
         },
       },
       rpc: {
@@ -254,9 +260,12 @@ function applyPlugin(plugin, locale, options = {}) {
     registrations,
     dictionaries,
     services,
+    connectionListenerCount: () => stateListeners.size,
+    connectionSubscribeCalls: () => stateSubscribeCalls,
+    connectionUnsubscribeCalls: () => stateUnsubscribeCalls,
     setConnectionState: (snapshot) => {
       stateSnapshot = snapshot
-      for (const listener of stateListeners) listener()
+      for (const listener of [...stateListeners]) listener()
     },
   }
 }
@@ -1061,6 +1070,90 @@ test('simultaneous panels share preference changes without overwriting other fie
     first.unmount()
     second.unmount()
   })
+})
+
+test('multiple panels share one Host description and one connection subscription', async () => {
+  loadPluginState = await loadPlugin()
+  let descriptions = 0
+  let resolveDescription
+  let describeSignal
+  const { registrations, dictionaries, connectionListenerCount,
+    connectionSubscribeCalls, connectionUnsubscribeCalls } = applyPlugin(loadPluginState.plugin, 'en', {
+    describe: (signal) => {
+      descriptions += 1
+      describeSignal = signal
+      return new Promise((resolve) => {
+        resolveDescription = resolve
+      })
+    },
+  })
+  const table = dictionaries[NS].en
+  const t = (key) => table[key] ?? key
+  const page = registrations.main.component
+  const first = mount(page, { t })
+  await flushPanel()
+  const second = mount(page, { t })
+  await flushPanel()
+
+  assert.equal(descriptions, 1, 'the second panel must reuse the in-flight Host description')
+  assert.equal(connectionSubscribeCalls(), 1, 'the plugin context owns one connection subscription')
+  assert.equal(connectionListenerCount(), 1)
+
+  first.unmount()
+  assert.equal(describeSignal.aborted, false, 'one panel leaving must not cancel shared work')
+  assert.equal(connectionListenerCount(), 1)
+
+  second.unmount()
+  assert.equal(describeSignal.aborted, true, 'the last panel leaving cancels the shared description')
+  assert.equal(connectionListenerCount(), 0)
+  assert.equal(connectionUnsubscribeCalls(), 1)
+
+  resolveDescription({ ...HOST_DESCRIBE, maxTextChars: 777 })
+  await flushPanel()
+  assert.equal(descriptions, 1, 'a late completion must not trigger a replacement request')
+})
+
+test('shared Host reconnect performs one refresh and updates every mounted panel', async () => {
+  loadPluginState = await loadPlugin()
+  let descriptions = 0
+  const { registrations, dictionaries, setConnectionState, connectionSubscribeCalls } = applyPlugin(
+    loadPluginState.plugin,
+    'en',
+    {
+      describe: () => {
+        descriptions += 1
+        return { ...HOST_DESCRIBE, maxTextChars: descriptions === 1 ? 1234 : 4321 }
+      },
+    },
+  )
+  const table = dictionaries[NS].en
+  const t = (key) => table[key] ?? key
+  const page = registrations.main.component
+  const first = mount(page, { t })
+  const second = mount(page, { t })
+  await flushPanel()
+
+  assert.equal(descriptions, 1, 'both panels share the initial metadata read')
+  assert.equal(connectionSubscribeCalls(), 1)
+  const firstCounter = findOne(first.tree, (node) => String(node.props?.id).endsWith('-counter'), 'first panel counter')
+  const secondCounter = findOne(second.tree, (node) => String(node.props?.id).endsWith('-counter'), 'second panel counter')
+  assert.match(textOf(firstCounter), /1234/)
+  assert.match(textOf(secondCounter), /1234/)
+
+  setConnectionState('disconnected')
+  await flushPanel()
+  assert.match(textOf(first.tree), /Offline/)
+  assert.match(textOf(second.tree), /Offline/)
+  setConnectionState('connected')
+  await flushPanel()
+
+  assert.equal(descriptions, 2, 'one shared reconnect should trigger one metadata refresh')
+  const refreshedFirst = findOne(first.tree, (node) => String(node.props?.id).endsWith('-counter'), 'refreshed first panel counter')
+  const refreshedSecond = findOne(second.tree, (node) => String(node.props?.id).endsWith('-counter'), 'refreshed second panel counter')
+  assert.match(textOf(refreshedFirst), /4321/)
+  assert.match(textOf(refreshedSecond), /4321/)
+  first.unmount()
+  second.unmount()
 })
 
 test('same-text submissions in one event turn share a single request', async () => {

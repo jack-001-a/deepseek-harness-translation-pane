@@ -37,6 +37,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Abort in-flight glossary activation when its panel unmounts, and reject duplicate same-turn apply clicks before the busy state rerenders.
 - Synchronize translation preferences across mounted panels and ignore out-of-order glossary file reads so the latest selection wins.
 - Listen for same-origin `storage` events so preference changes in another browser tab update every mounted panel without echo writes.
+- Share Host metadata refreshes and connection-state subscriptions across mounted panels; cancel shared work only after the final panel unmounts.
 - Ignore malformed optional glossary rows and unknown warning codes at the browser Host boundary instead of misreporting a valid Host snapshot as offline.
 - Prevent swapping an Auto-detected source into the same selected target language after detection.
 - Read the stored preference object once, reject malformed/array snapshots, and normalize empty or unsupported values while preserving custom language tags.

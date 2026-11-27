@@ -73,3 +73,8 @@ Translation preferences live in a factory-scoped shared snapshot and notify ever
 
 
 Preference changes are also synchronized between same-origin browser tabs through one shared `storage` listener per plugin context. The listener is installed while at least one panel is mounted, filters unrelated storage areas and keys, normalizes incoming snapshots and is removed after the last panel unmounts. Incoming events update local subscribers without writing back to storage.
+
+
+### Shared Host connection lifecycle
+
+Host metadata is stored once per plugin factory and broadcast to each mounted panel. The factory holds one connection-state subscription and deduplicates concurrent `describe()` calls. Disconnect/reconnect transitions update every panel from the same snapshot; a panel unmount does not cancel shared work while another panel remains mounted, and the last unmount removes the subscription and aborts the active description.
