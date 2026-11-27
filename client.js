@@ -910,7 +910,7 @@ window.__ModuleLoader__.load({
      * @returns glossary editor state and event handlers.
      */
     function useGlossaryEditor(options) {
-      const { host, setHost, mountedRef, resetTranslation } = options
+      const { host, setHost, mountedRef, resetTranslation, t } = options
       const [glossaryBusy, setGlossaryBusy] = React.useState(false)
       const [glossaryMessage, setGlossaryMessage] = React.useState(null)
       const [glossaryOpen, setGlossaryOpen] = React.useState(false)
@@ -952,7 +952,7 @@ window.__ModuleLoader__.load({
         const copied = await copyText(glossaryJson(host.glossary))
         if (!mountedRef.current) return
         setGlossaryMessage(copied ? t('glossary.exported') : t('error.copyFailed'))
-      }, [host.glossary, mountedRef])
+      }, [host.glossary, mountedRef, t])
 
       const importGlossaryFile = React.useCallback(async (event) => {
         if (!mountedRef.current) return
@@ -975,7 +975,7 @@ window.__ModuleLoader__.load({
         } catch {
           if (mountedRef.current) setGlossaryMessage(t('glossary.invalidFile'))
         }
-      }, [mountedRef])
+      }, [mountedRef, t])
 
       return {
         glossaryDraft,
@@ -1086,6 +1086,7 @@ window.__ModuleLoader__.load({
         setHost,
         mountedRef,
         resetTranslation,
+        t,
         glossaryDraft,
         setGlossaryDraft,
         glossaryDraftDirtyRef,

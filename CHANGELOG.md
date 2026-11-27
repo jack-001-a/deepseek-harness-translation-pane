@@ -18,6 +18,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Pass the active locale translator into the extracted glossary hook and refresh localized clipboard/import feedback when the locale changes.
 - Keep the Host metadata refresh callback stable so publishing connection state cannot recursively retrigger the initial request.
 - Ignore delayed glossary import, glossary apply/export, and clipboard completions after the workbench unmounts.
 - Clear the previous translation as soon as a new request starts, and show an explicit in-flight state so stale output cannot be mistaken for the current request.
