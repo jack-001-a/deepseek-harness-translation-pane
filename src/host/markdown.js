@@ -129,8 +129,13 @@ export function markdownSegments(source) {
       commentCursor = enclosing.end
       continue
     }
-    const commentClose = source.indexOf('-->', commentStart + 4)
-    const commentEnd = commentClose < 0 ? source.length : commentClose + 3
+    // HTML defines both --> and --!> as comment-end tokens. Stop at
+    // the first valid terminator so a legacy closing form cannot hide the
+    // remainder of the document from translation.
+    const commentClose = /--!?>/.exec(source.slice(commentStart + 4))
+    const commentEnd = commentClose === null
+      ? source.length
+      : commentStart + 4 + commentClose.index + commentClose[0].length
     add(commentStart, commentEnd)
     commentCursor = commentEnd
   }
