@@ -1349,14 +1349,35 @@ function resolveProviderPresentation(options) {
       const [glossaryMessage, setGlossaryMessage] = React.useState(null)
       const [glossaryOpen, setGlossaryOpen] = React.useState(false)
       const { glossaryDraft, setGlossaryDraft, glossaryDraftDirtyRef } = options
+      const applyAbortRef = React.useRef(null)
+
+      // Applying a glossary is a Host mutation, so stop its transport work
+      // when this editor leaves the page. The ref also closes the same-turn
+      // double-click window before React can publish the busy state.
+      React.useEffect(() => () => {
+        applyAbortRef.current?.abort()
+        applyAbortRef.current = null
+      }, [])
 
       const applyGlossary = React.useCallback(async () => {
-        if (!mountedRef.current || !host.connected || glossaryBusy) return
+        if (
+          !mountedRef.current ||
+          !host.connected ||
+          glossaryBusy ||
+          applyAbortRef.current !== null
+        ) return
+        const controller = new AbortController()
+        applyAbortRef.current = controller
         setGlossaryBusy(true)
         setGlossaryMessage(null)
         try {
-          const value = await callHost(ctx, 'setGlossary', { payload: glossaryDraft })
-          if (!mountedRef.current) return
+          const value = await callHost(
+            ctx,
+            'setGlossary',
+            { payload: glossaryDraft },
+            controller.signal,
+          )
+          if (!mountedRef.current || controller.signal.aborted) return
           const nextGlossary = normalizeGlossaryEntries(value?.glossary)
           const warnings = normalizeGlossaryWarnings(value?.warnings)
           glossaryDraftDirtyRef.current = false
@@ -1373,11 +1394,12 @@ function resolveProviderPresentation(options) {
               : t('glossary.applied', { count: nextGlossary.length }),
           )
         } catch (failure) {
-          if (mountedRef.current) {
+          if (mountedRef.current && !controller.signal.aborted) {
             setGlossaryMessage(diagnosticFor(failure) || t('error.generic'))
           }
         } finally {
-          if (mountedRef.current) setGlossaryBusy(false)
+          if (applyAbortRef.current === controller) applyAbortRef.current = null
+          if (mountedRef.current && !controller.signal.aborted) setGlossaryBusy(false)
         }
       }, [glossaryBusy, glossaryDraft, host.connected, mountedRef, resetTranslation, setHost, t])
 

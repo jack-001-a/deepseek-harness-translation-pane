@@ -34,6 +34,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - Treat RPC success payloads without a string translation as invalid responses instead of displaying a false empty success.
 - Clear stale offline presentation during the Host's `connecting` phase, abort superseded metadata reads, and ignore duplicate connection-state notifications.
+- Abort in-flight glossary activation when its panel unmounts, and reject duplicate same-turn apply clicks before the busy state rerenders.
 - Ignore malformed optional glossary rows and unknown warning codes at the browser Host boundary instead of misreporting a valid Host snapshot as offline.
 - Prevent swapping an Auto-detected source into the same selected target language after detection.
 - Read the stored preference object once, reject malformed/array snapshots, and normalize empty or unsupported values while preserving custom language tags.

@@ -216,7 +216,7 @@ function applyPlugin(plugin, locale, options = {}) {
               const glossary = Array.isArray(parsed) ? parsed : parsed.glossary
               return { glossary, warnings: [], count: glossary.length, revision: 1 }
             })
-            return Promise.resolve(action(payload?.args)).then((value) => {
+            return Promise.resolve(action(payload?.args, signal)).then((value) => {
               if (value !== null && typeof value === 'object' && typeof value.ok === 'boolean') return value
               return { ok: true, value }
             })
@@ -889,6 +889,62 @@ test('unmount aborts a pending Host description', async () => {
   assert.equal(requestSignal.aborted, true, 'closing the panel must stop the metadata request')
 })
 
+test('simultaneous panel instances keep DOM ids and translation cancellation isolated', async () => {
+  loadPluginState = await loadPlugin()
+  const pendingTranslations = []
+  const { registrations, dictionaries } = applyPlugin(loadPluginState.plugin, 'en', {
+    translate: (args, signal) => new Promise((resolve) => {
+      pendingTranslations.push({ args, signal, resolve })
+    }),
+  })
+  const table = dictionaries[NS].en
+  const t = (key, params) => {
+    const template = table[key] ?? key
+    if (!params) return template
+    return template.replace(/\{(\w+)\}/g, (match, name) =>
+      name in params ? String(params[name]) : match,
+    )
+  }
+  const page = registrations.main.component
+  const first = mount(page, { t })
+  const second = mount(page, { t })
+  await flushPanel()
+
+  const ids = (owner) => findAll(
+    owner.tree,
+    (node) => typeof node.props?.id === 'string' && node.props.id.length > 0,
+  ).map((node) => node.props.id)
+  const firstIds = ids(first)
+  const secondIds = ids(second)
+  const combinedIds = [...firstIds, ...secondIds]
+  assert.ok(firstIds.length > 0 && secondIds.length > 0)
+  assert.equal(new Set(combinedIds).size, combinedIds.length, 'all mounted panel ids must be unique')
+
+  await typeSource(first, 'first instance')
+  await typeSource(second, 'second instance')
+  translateButton(first.tree).props.onClick()
+  translateButton(second.tree).props.onClick()
+  await flushPanel()
+
+  assert.equal(pendingTranslations.length, 2, 'each panel must own an independent translation request')
+  assert.equal(pendingTranslations[0].args.text, 'first instance')
+  assert.equal(pendingTranslations[1].args.text, 'second instance')
+  first.unmount()
+  assert.equal(pendingTranslations[0].signal.aborted, true, 'unmount cancels only the first instance request')
+  assert.equal(pendingTranslations[1].signal.aborted, false, 'the second instance request must remain active')
+
+  pendingTranslations[1].resolve({
+    text: 'second instance result',
+    provider: 'bing',
+    requestedProvider: 'bing',
+    failover: false,
+  })
+  await flushPanel()
+  const result = findOne(second.tree, (node) => node.props?.role === 'region', 'the second instance result region')
+  assert.equal(textOf(result), 'second instance result')
+  second.unmount()
+})
+
 test('same-text submissions in one event turn share a single request', async () => {
   loadPluginState = await loadPlugin()
   let calls = 0
@@ -1551,13 +1607,17 @@ test('an imported glossary file finishing after unmount does not update panel st
   assert.equal(mounted.scheduleCalls, schedulesAtUnmount)
 })
 
-test('a glossary apply finishing after unmount does not update panel state', async () => {
+test('a glossary apply is aborted on unmount and cannot update panel state', async () => {
   loadPluginState = await loadPlugin()
   let finishApply
+  let applySignal
   const { mounted } = mountPanel({
-    setGlossary: () => new Promise((resolve) => {
-      finishApply = resolve
-    }),
+    setGlossary: (_args, signal) => {
+      applySignal = signal
+      return new Promise((resolve) => {
+        finishApply = resolve
+      })
+    },
   })
   await flushPanel()
   const apply = findOne(
@@ -1567,12 +1627,43 @@ test('a glossary apply finishing after unmount does not update panel state', asy
   )
   apply.props.onClick()
   await flushPanel()
+  assert.ok(applySignal, 'the Host mutation must receive an AbortSignal')
+  assert.equal(applySignal.aborted, false)
   const schedulesAtUnmount = mounted.scheduleCalls
   mounted.unmount()
 
+  assert.equal(applySignal.aborted, true, 'unmount must cancel the Host mutation')
+  // Simulate a transport which delivers a response despite cancellation.
   finishApply({ glossary: [], warnings: [], count: 0, revision: 1 })
   await flushPanel()
   assert.equal(mounted.scheduleCalls, schedulesAtUnmount)
+})
+
+test('same-turn glossary apply clicks submit only one Host mutation', async () => {
+  loadPluginState = await loadPlugin()
+  let calls = 0
+  let applySignal
+  const { mounted } = mountPanel({
+    setGlossary: (_args, signal) => {
+      calls += 1
+      applySignal = signal
+      return new Promise(() => {})
+    },
+  })
+  await flushPanel()
+  const apply = findOne(
+    mounted.tree,
+    (node) => node.type === 'button' && textOf(node) === 'Apply glossary',
+    'the Apply glossary action',
+  )
+  apply.props.onClick()
+  apply.props.onClick()
+  await flushPanel()
+
+  assert.equal(calls, 1, 'the in-flight ref must block a duplicate before the busy rerender')
+  assert.ok(applySignal)
+  mounted.unmount()
+  assert.equal(applySignal.aborted, true, 'cleanup must cancel the only active mutation')
 })
 
 test('language and provider controls preserve swap accessibility and direction changes', async () => {

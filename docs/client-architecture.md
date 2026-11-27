@@ -60,3 +60,8 @@ and reproducible maintenance; Harness still loads only `client.js`.
 ### Host connection transitions
 
 `useHostConnection` tracks the last observed connection snapshot. Duplicate notifications do not issue duplicate `describe()` RPCs. A transition to `connecting` invalidates any in-flight metadata read and clears the stale offline alert while keeping the panel in its connecting state; a transition to `disconnected` remains explicitly offline, and only a subsequent `connected` transition starts a fresh Host description.
+
+
+### Glossary mutation lifecycle
+
+The glossary editor owns an AbortController for its active Host mutation. Unmounting the panel aborts that RPC, and the same controller ref closes the same-turn duplicate-submit window before React publishes the busy state. A late response is ignored after cancellation.
