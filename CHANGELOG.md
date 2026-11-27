@@ -9,6 +9,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ### Changed
 
 - Centralize language, provider and format defaults, Host provider reconciliation, and local persistence in a focused `useTranslationPreferences` hook.
+- Isolate provider-notice precedence and result-service labeling from the workbench, with an accessible presentational status component.
 - Extract translation dispatch, request-generation guards, cancellation, result/error state and post-translation Host refresh into a focused `useTranslationRequest` hook.
 - Extract glossary draft state, import/export, Host apply and post-apply result invalidation into a focused `useGlossaryEditor` hook.
 - Extract Host metadata, reconnect subscriptions, retry cancellation and stale-response protection into a focused `useHostConnection` hook.

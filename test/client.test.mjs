@@ -1011,6 +1011,15 @@ test('a mixed-provider answer names every service that answered', async () => {
   loadPluginState = await loadPlugin()
   await withPreferences({ provider: 'google' }, async () => {
     const { mounted } = mountPanel({
+      // A mixed answer must describe the services that contributed, even if
+      // the originally selected provider is currently marked unreachable.
+      describe: {
+        ...HOST_DESCRIBE,
+        providerHealth: {
+          bing: { unreachable: false },
+          google: { unreachable: true },
+        },
+      },
       translate: () => ({
         text: '你好世界',
         provider: 'google',

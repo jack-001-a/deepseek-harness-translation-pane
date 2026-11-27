@@ -1210,6 +1210,69 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Derive provider messaging and the actual service label in one place.
+     * Mixed-fragment results take precedence over single-provider failover
+     * and health warnings, so the notice describes what really happened.
+     * @param options - the current request, Host health and localized labels.
+     * @returns the notice text and service label for result metadata.
+     */
+    function resolveProviderPresentation(options) {
+      const {
+        pending,
+        result,
+        provider,
+        providerHealth,
+        failoverCapable,
+        error,
+        providerLabel,
+        providerName,
+        t,
+      } = options
+      const degradedProvider = providerHealth?.[provider]?.unreachable === true
+      const mixedServed =
+        !pending && Array.isArray(result?.providersServed) && result.providersServed.length > 1
+          ? result.providersServed
+          : null
+
+      let notice = null
+      if (mixedServed !== null) {
+        notice = t('notice.mixed', { providers: mixedServed.map(providerName).join(' + ') })
+      } else if (
+        !pending &&
+        result?.failover === true &&
+        typeof result.requestedProvider === 'string' &&
+        typeof result.provider === 'string' &&
+        (result.requestedProvider === provider || result.provider === provider)
+      ) {
+        notice = t('notice.failover', {
+          requested: providerName(result.requestedProvider),
+          served: providerName(result.provider),
+        })
+      } else if (degradedProvider && failoverCapable && error === null) {
+        // Only promise an automatic switch when the Host can actually make one.
+        notice = t('notice.providerDown', { provider: providerName(provider) })
+      }
+
+      // Metadata follows the service (or services) that actually answered.
+      const servedLabel =
+        mixedServed !== null
+          ? mixedServed.map(providerName).join(' + ')
+          : typeof result?.provider === 'string' && result.provider.length > 0 && result.provider !== 'none'
+            ? providerName(result.provider)
+            : providerLabel
+      return { notice, servedLabel }
+    }
+
+    /**
+     * Render a provider warning as an announced status message.
+     * @param props - the derived notice text.
+     * @returns the status message, or nothing when there is no notice.
+     */
+    function ProviderStatusNotice({ notice }) {
+      return notice === null ? null : h('p', { className: 'dshTr-notice', role: 'status' }, notice)
+    }
+
+    /**
      * The translation workbench.
      * @param props - the slot props, carrying the bound translator.
      * @returns the workbench element.
@@ -1368,46 +1431,17 @@ window.__ModuleLoader__.load({
       const overLimit = host.limit !== null && source.length > host.limit
       const canTranslate = source.trim().length > 0 && !pending && !overLimit
 
-      // The Host may already know the selected service is unreachable, either
-      // from `describe()` or from the request that just failed over. Say so
-      // before the user sends text into a service that cannot answer.
-      const degradedProvider = host.providerHealth[provider]?.unreachable === true
-      // One long demand can be split across both providers. The single-service
-      // failover copy would then name the same service twice, so a mixed answer
-      // gets its own sentence instead.
-      const mixedServed =
-        !pending && Array.isArray(result?.providersServed) && result.providersServed.length > 1
-          ? result.providersServed
-          : null
-      const mixedNotice =
-        mixedServed === null
-          ? null
-          : t('notice.mixed', { providers: mixedServed.map(providerName).join(' + ') })
-      const failoverNotice =
-        mixedServed === null &&
-        !pending &&
-        result?.failover === true &&
-        typeof result.requestedProvider === 'string' &&
-        typeof result.provider === 'string' &&
-        (result.requestedProvider === provider || result.provider === provider)
-          ? t('notice.failover', {
-              requested: providerName(result.requestedProvider),
-              served: providerName(result.provider),
-            })
-          : null
-      // The warning promises an automatic switch, so it is only shown when the
-      // Host can actually make one, and a live failure explains itself better.
-      const healthNotice = degradedProvider && host.failoverCapable && error === null
-        ? t('notice.providerDown', { provider: providerName(provider) })
-        : null
-      const notice = mixedNotice ?? failoverNotice ?? healthNotice
-      // The meta line names every service that answered, not just the first.
-      const servedLabel =
-        mixedServed !== null
-          ? mixedServed.map(providerName).join(' + ')
-          : typeof result?.provider === 'string' && result.provider.length > 0 && result.provider !== 'none'
-            ? providerName(result.provider)
-            : providerLabel
+      const { notice, servedLabel } = resolveProviderPresentation({
+        pending,
+        result,
+        provider,
+        providerHealth: host.providerHealth,
+        failoverCapable: host.failoverCapable,
+        error,
+        providerLabel,
+        providerName,
+        t,
+      })
 
       /**
        * Explain why the swap cannot act, when it cannot.
@@ -1617,9 +1651,7 @@ window.__ModuleLoader__.load({
           : format === 'markdown'
             ? h('p', { className: 'dshTr-note', role: 'note' }, t('note.markdown'))
             : null,
-        notice === null
-          ? null
-          : h('p', { className: 'dshTr-notice', role: 'status' }, notice),
+        h(ProviderStatusNotice, { notice }),
         swapReason === null
           ? null
           : h('p', { className: 'dshTr-note', id: ids.note }, t(swapReason)),
