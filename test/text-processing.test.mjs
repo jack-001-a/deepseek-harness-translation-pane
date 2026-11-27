@@ -158,7 +158,7 @@ test('Markdown segmentation protects multiline and unclosed HTML comments', () =
     'Translate before alternate comment.',
     '<!-- alternate HTML comment terminator --!>',
     'Translate after alternate comment.',
-  ].join('\\n')
+  ].join('\n')
   const alternateSegments = markdownSegments(alternateClose)
   assert.equal(alternateSegments.map((segment) => segment.text).join(''), alternateClose)
   const alternateProse = alternateSegments.filter((segment) => segment.translate).map((segment) => segment.text).join('')
