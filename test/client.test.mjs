@@ -1164,3 +1164,23 @@ test('the glossary disclosure uses valid summary content and stays user-toggleab
   assert.equal(currentDetails.props.open, false)
   mounted.unmount()
 })
+ 
+test('Host glossary warnings open the advanced glossary section automatically', async () => {
+  loadPluginState = await loadPlugin()
+  const { mounted } = mountPanel({
+    describe: {
+      ...HOST_DESCRIBE,
+      glossaryWarnings: [{ code: 'overlapping-terms', message: 'overlap' }],
+    },
+  })
+  await flushPanel()
+
+  const details = findOne(
+    mounted.tree,
+    (node) => node.type === 'details' && node.props?.className === 'dshTr-glossaryDetails',
+    'the glossary disclosure',
+  )
+  assert.equal(details.props.open, true)
+  assert.match(textOf(mounted.tree), /Overlapping glossary terms/)
+  mounted.unmount()
+})

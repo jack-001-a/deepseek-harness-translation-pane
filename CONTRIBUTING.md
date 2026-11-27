@@ -27,7 +27,7 @@ Useful areas include:
 - Provider compatibility and honest error reporting.
 - Documentation, reproducible bug reports and automated tests.
 
-See [ROADMAP.md](ROADMAP.md) for proposed priorities. Roadmap items are discussion points, not promises or a fixed release schedule.
+Prioritize user-visible correctness, privacy boundaries, accessibility and maintainability over feature count.
 
 ## Bug reports and feature requests
 

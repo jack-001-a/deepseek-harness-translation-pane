@@ -106,7 +106,7 @@ window.__ModuleLoader__.load({
       'swap.unknown':
         'The source language has not been detected yet, so the languages cannot be swapped. Translate once, then swap.',
       'swap.pending': 'A translation is already running. Cancel it before swapping languages.',
-      'hint.keyboard': 'Ctrl+Enter translates · Esc cancels while translating.',
+      'hint.keyboard': 'Ctrl/⌘+Enter translates · Esc cancels while translating.',
       'notice.providerDown':
         'The {provider} service is unavailable right now; translations will automatically use the other service.',
       'notice.failover': 'The {requested} service could not answer, so the Host translated with {served}.',
@@ -194,7 +194,7 @@ window.__ModuleLoader__.load({
       'swap.same': '源语言与目标语言相同，无需交换。',
       'swap.unknown': '尚未识别出源语言，暂时无法交换语言；先翻译一次即可交换。',
       'swap.pending': '已有翻译正在进行，请先取消再交换语言。',
-      'hint.keyboard': 'Ctrl+Enter 翻译 · 翻译中按 Esc 取消。',
+      'hint.keyboard': 'Ctrl/⌘+Enter 翻译 · 翻译中按 Esc 取消。',
       'notice.providerDown': '当前 {provider} 服务不可用，翻译将自动改用另一项服务。',
       'notice.failover': '{requested} 服务未能完成翻译，Host 已改用 {served} 完成。',
       'notice.mixed': '这篇文本由多项服务共同完成（{providers}）。',
@@ -654,10 +654,7 @@ window.__ModuleLoader__.load({
       const health = {}
       for (const [provider, entry] of Object.entries(value)) {
         if (entry === null || typeof entry !== 'object' || typeof entry.unreachable !== 'boolean') continue
-        health[provider] = {
-          unreachable: entry.unreachable,
-          reason: typeof entry.reason === 'string' ? entry.reason : '',
-        }
+        health[provider] = { unreachable: entry.unreachable }
       }
       return health
     }

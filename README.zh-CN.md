@@ -9,7 +9,8 @@
 | 位置 | 功能 |
 |---|---|
 | 侧边栏 | 一个 Translation 入口，在主区域打开翻译页面 |
-| 翻译工作台 | 响应式双栏编辑区、源语言/目标语言与服务选择、普通文本/JSON/Markdown 格式、语言交换、复制、清空、字符计数、请求取消和键盘快捷键 |
+| 翻译工作台 | 响应式原文/译文编辑区、语言与 Provider 选择、普通文本/JSON/Markdown 格式、语言交换、复制、清空、字符计数、请求取消和快捷键 |
+| 术语表 | 可选的本地术语替换、语言范围、JSON 导入/导出与重叠诊断；高级编辑默认折叠 |
 | Provider 故障切换 | 直连模式下，Bing 或 Google 发生可切换的服务级故障时，尝试另一个 Provider，并明确显示实际提供译文的服务 |
 | Agent 工具 | `translate_text(text, targetLanguage, sourceLanguage?, format?)` |
 
@@ -40,8 +41,8 @@ dsh plugin add ./dsh-translation-pane
 1. 输入或粘贴要翻译的文本。
 2. 选择源语言和目标语言；源语言可设为自动检测。
 3. 选择可用翻译服务及内容格式。
-4. 点击 Translate，或使用 `Ctrl+Enter`。
-5. 复制译文，或取消正在执行的请求。
+4. 点击 Translate，或使用 `Ctrl/⌘+Enter`（macOS 可用 Command）。
+5. 复制译文；翻译过程中可点击 Cancel 或按 `Esc` 取消。
 
 ### JSON 模式
 
@@ -64,6 +65,12 @@ Agent 工具也支持：
 在 Format 中选择 **Markdown（保留文档结构）**。插件只会把普通段落、标题文本和链接标签等自然语言内容发送给翻译服务；代码围栏及代码内容、行内代码、链接目标、裸 URL、模板占位符、HTML 标签、实体和常见 Markdown 结构标记会原样保留，并在翻译后按原顺序重组。
 
 这是一套保守的 Markdown 词法保护，不是完整的 CommonMark 解析器。项目自定义扩展或复杂嵌套链接可能需要额外适配。Agent 工具使用 `format: "markdown"` 开启同样的行为。默认仍为普通文本。
+
+### 术语表
+
+展开 **Terminology glossary** 可编辑术语规则。支持版本化 JSON（也兼容旧版数组）导入/导出、语言范围、大小写/整词匹配和优先级规则。Host 会提示重复或重叠术语；有警告时会自动展开该区域。
+
+术语命中会在本地替换，不会把匹配到的原文术语发送给翻译服务。应用后的规则仅在当前 Host 会话生效；需要跨重启保留时，请导出 JSON 并写入 profile 配置。修改术语表会清理旧缓存并清空旧译文。
 
 ## 翻译通道
 
@@ -109,8 +116,10 @@ Agent 工具也支持：
     retryMaxMs: 4000
     maxResponseBytes: 1048576
     cacheSize: 64
+    cacheMaxBytes: 8388608
     rateLimitPerMinute: 60
     maxConcurrency: 3
+    maxQueuedRequests: 24
 ```
 
 完整配置项、默认值和行为说明请查看英文版 [README.md](README.md) 的 Config 章节。
@@ -127,7 +136,6 @@ npm test
 测试使用 fake Cordis context 和 stubbed fetch，不需要安装 Harness，也不会访问真实翻译服务。
 
 - [贡献指南](CONTRIBUTING.md)
-- [项目路线图](ROADMAP.md)
 - [Harness 运行时兼容性说明](docs/harness-runtime-compatibility.md)
 - [更新日志](CHANGELOG.md)
 

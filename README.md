@@ -8,7 +8,7 @@ on npm and on [GitHub](https://github.com/jack-001-a/deepseek-harness-translatio
 
 For security reporting and data-handling boundaries, see [SECURITY.md](SECURITY.md).
 
-**Documentation:** [简体中文](README.zh-CN.md) · [Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md)
+**Documentation:** [简体中文](README.zh-CN.md) · [Contributing](CONTRIBUTING.md)
 
 
 ## What it adds
@@ -16,7 +16,8 @@ For security reporting and data-handling boundaries, see [SECURITY.md](SECURITY.
 | Where | What |
 |---|---|
 | Sidebar panel rail | A **Translation** icon that opens the page in the main column |
-| Translation page | Source/target language pickers, provider picker, source and result cards, a swap action, copy, clear, a live character counter, and `Ctrl+Enter` to translate |
+| Translation page | Responsive source/result workbench, language and provider pickers, plain-text/JSON/Markdown modes, swap, copy, clear, live character count, cancellation and keyboard shortcuts |
+| Terminology glossary | Optional local term substitutions with scoped rules, JSON import/export and overlap diagnostics; advanced editing stays out of the way until opened |
 | Failover | Falls over to the other anonymous provider when the selected one is unreachable, and says which service served the text |
 | Agent tool | `translate_text(text, targetLanguage, sourceLanguage?, format?)` returning the translation |
 
@@ -25,6 +26,19 @@ The language, provider and format choices are remembered in the page's local sto
 Choose **JSON values only** in the Format selector to translate JSON safely. The parser validates the document, leaves object keys and all non-string values untouched, and translates only string values. It preserves the original JSON whitespace and layout rather than reserializing the document.
 
 Choose **Markdown (preserve structure)** to translate prose while keeping fenced and inline code, Markdown link destinations and syntax, bare URLs, template placeholders, HTML tags, entities and common block prefixes out of provider requests. Link labels and ordinary prose are translated; protected source spans are reassembled unchanged and in their original order. This is a conservative Markdown lexer, not a full CommonMark parser, so project-specific extensions or unusual nested link syntax may need additional coverage. The agent tool accepts the same opt-in `format: "markdown"` argument. The default remains plain text.
+
+### Terminology glossary
+
+The advanced **Terminology glossary** is collapsed by default and opens automatically
+when the Host reports terminology warnings. It accepts a versioned JSON document
+(or the legacy array format), supports language-scoped and whole-word rules, and
+shows duplicate or overlapping-term diagnostics. Matching terms are substituted
+locally; the matched source terms are not sent to the translation provider.
+
+Applying a glossary affects the current Host session only. Export the JSON and
+store it in your profile configuration when you need to keep it across restarts.
+Applying changes invalidates cached translations and clears the visible result,
+so an answer produced with old terminology is not mistaken for a current one.
 
 ## How translation runs
 
@@ -76,10 +90,8 @@ here: the pane does not invent a cross-provider retry on top of it.
 The anonymous endpoints rate-limit, return `5xx` and occasionally hang. The
 Host therefore:
 
-- **fails over** a provider-level fault to the other anonymous provider once,
-  with a short per-attempt header deadline (`attemptTimeoutMs`) and a cooldown
-  (`providerCooldownMs`) that keeps later requests off a provider known to be
-  dead. See [Provider failover and health](#provider-failover-and-health).
+- **routes** provider-level failures according to the health and failover
+  rules described above; it never hides which provider served the result.
 - **retries** transient failures only — network errors, HTTP `429` and HTTP
   `5xx` — with exponential back-off and jitter. A valid `Retry-After` delay
   takes precedence over the local back-off ceiling; the whole-request deadline
@@ -482,11 +494,10 @@ Restart the Harness if your profile does not hot-reload plugin bundles.
 
 ## Layout and scrolling
 
-The page fills the main column and is itself the scroll container, so a short
-window scrolls instead of clipping the lower controls. Each text card is capped
-at `45vh` (never below 264px): a long translation scrolls inside its own card
-rather than stretching the page, and the source textarea scrolls internally
-once the input outgrows the card.
+The workbench adapts to its available container width. On wide layouts, the
+source and result cards sit side by side; on narrow layouts they stack. The page
+owns vertical scrolling, while long text scrolls inside its own editor/result
+surface. Desktop cards are capped at 560px and narrow cards at 440px.
 
 ## Development
 
