@@ -6,6 +6,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ## Unreleased
 
+## [1.4.0] — 2026-11-27
+
 ### Added
 
 - Declare the tested DeepSeek Harness compatibility range in `engines.dsh` and enforce it in CI and release validation.
