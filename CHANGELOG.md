@@ -42,6 +42,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Re-read available persisted preferences on panel reopen and discard stale Host metadata after the final panel unmounts.
 - Dispose the Host service idempotently: abort its lifetime, purge cached translations and glossary data, clear in-flight indexes, and reject glossary writes after unload; keep session glossary rows out of static runtime settings so no duplicate configuration reference survives disposal.
 - Ignore malformed optional glossary rows and unknown warning codes at the browser Host boundary instead of misreporting a valid Host snapshot as offline.
+- Return detached glossary warning records so callers cannot mutate the Host's subsequent metadata snapshots.
 - Prevent swapping an Auto-detected source into the same selected target language after detection.
 - Read the stored preference object once, reject malformed/array snapshots, and normalize empty or unsupported values while preserving custom language tags.
 - Ignore duplicate same-text submissions before the next render and abort in-flight translation work when the workbench unmounts or resets.

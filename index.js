@@ -41,6 +41,18 @@ import {
 } from './src/host/glossary.js'
 export { splitText }
 
+/**
+ * Return detached glossary diagnostics to Remote callers.
+ *
+ * Warning records are plain scalar data today; copying every record and the
+ * outer array prevents a consumer from mutating the service's next snapshot.
+ * @param warnings - the service-owned warning records.
+ * @returns caller-owned warning records.
+ */
+function copyGlossaryWarnings(warnings) {
+  return warnings.map((warning) => ({ ...warning }))
+}
+
 /** Cordis service key and API Gateway wire namespace. */
 const SERVICE_KEY = 'translationPane'
 /** Property the Typert protocol stores Remote method markers under. */
@@ -429,7 +441,7 @@ export class TranslationPaneService {
         enabled: entry.enabled,
         priority: entry.priority,
       })),
-      glossaryWarnings: this.glossaryWarnings,
+      glossaryWarnings: copyGlossaryWarnings(this.glossaryWarnings),
       // Plain data, computed from what was observed so far; this call never
       // probes the network or awaits anything. The translator route owns its
       // own routing, so it reports no direct-provider health.
@@ -474,7 +486,7 @@ export class TranslationPaneService {
         enabled: entry.enabled,
         priority: entry.priority,
       })),
-      warnings: this.glossaryWarnings,
+      warnings: copyGlossaryWarnings(this.glossaryWarnings),
       count: this.glossary.length,
       revision: this.glossaryRevision,
     }

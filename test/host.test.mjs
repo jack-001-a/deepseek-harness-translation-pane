@@ -339,6 +339,30 @@ test('config: provider endpoints reject credentials and URL fragments', () => {
   assert.equal(config.googleEndpoint, 'https://translate.googleapis.com/translate_a/single')
 })
 
+test('glossary: returned warnings cannot mutate the Host snapshot', () => {
+  const h = harness()
+  const imported = h.service.setGlossary(JSON.stringify([
+    { source: 'cat', target: '猫' },
+    { source: 'catalog', target: '目录' },
+  ]))
+  assert.ok(imported.warnings.length > 0, 'the overlapping terms should produce a diagnostic')
+  const originalMessage = imported.warnings[0].message
+
+  imported.warnings[0].message = 'mutated import response'
+  imported.warnings.push({ code: 'injected', message: 'injected warning' })
+
+  const firstSnapshot = h.service.describe()
+  assert.equal(firstSnapshot.glossaryWarnings.length, 1)
+  assert.equal(firstSnapshot.glossaryWarnings[0].message, originalMessage)
+
+  firstSnapshot.glossaryWarnings[0].message = 'mutated describe response'
+  firstSnapshot.glossaryWarnings.length = 0
+
+  const secondSnapshot = h.service.describe()
+  assert.equal(secondSnapshot.glossaryWarnings.length, 1)
+  assert.equal(secondSnapshot.glossaryWarnings[0].message, originalMessage)
+})
+
 test('describe: it reports the routing facts the browser needs', () => {
   const h = harness()
   const described = h.service.describe()
