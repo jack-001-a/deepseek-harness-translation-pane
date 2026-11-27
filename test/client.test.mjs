@@ -453,7 +453,7 @@ async function withPreferences(preferences, run) {
     },
   }
   try {
-    return await run()
+    return await run(store)
   } finally {
     if (previous === undefined) delete globalThis.localStorage
     else globalThis.localStorage = previous
@@ -462,6 +462,133 @@ async function withPreferences(preferences, run) {
 
 /** The loaded plugin, shared by every test. */
 let loadPluginState
+
+test('stored translation preferences are restored and persisted as one snapshot', async () => {
+  loadPluginState = await loadPlugin()
+  await withPreferences({
+    sourceLanguage: 'fr',
+    targetLanguage: 'ja',
+    provider: 'google',
+    format: 'markdown',
+    legacyFlag: true,
+  }, async (store) => {
+    const { mounted } = mountPanel()
+    await flushPanel()
+
+    const selectValue = (suffix) => findOne(
+      mounted.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith(suffix),
+      `the ${suffix} selector`,
+    ).props.value
+    assert.equal(selectValue('-source'), 'fr')
+    assert.equal(selectValue('-target'), 'ja')
+    assert.equal(selectValue('-service'), 'google')
+    assert.equal(selectValue('-format'), 'markdown')
+
+    const change = (suffix, value) => {
+      findOne(
+        mounted.tree,
+        (node) => node.type === 'select' && String(node.props?.id).endsWith(suffix),
+        `the ${suffix} selector`,
+      ).props.onChange({ target: { value } })
+    }
+    change('-source', 'en')
+    change('-target', 'zh-Hans')
+    change('-service', 'bing')
+    change('-format', 'json')
+    await flushPanel()
+
+    assert.deepEqual(JSON.parse(store.get(STORAGE_KEY)), {
+      sourceLanguage: 'en',
+      targetLanguage: 'zh-Hans',
+      provider: 'bing',
+      format: 'json',
+    })
+    mounted.unmount()
+  })
+})
+
+test('invalid stored preference values fall back without rejecting custom language tags', async () => {
+  loadPluginState = await loadPlugin()
+  await withPreferences({
+    sourceLanguage: 'custom-lang-x',
+    targetLanguage: '',
+    provider: 'not-a-provider',
+    format: 'xml',
+  }, async (store) => {
+    const { mounted } = mountPanel()
+    await flushPanel()
+
+    const value = (suffix) => findOne(
+      mounted.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith(suffix),
+      `the ${suffix} selector`,
+    ).props.value
+    assert.equal(value('-source'), 'custom-lang-x', 'custom language tags remain compatible with newer Hosts')
+    assert.equal(value('-target'), 'zh-Hans')
+    assert.equal(value('-service'), 'bing')
+    assert.equal(value('-format'), 'text')
+    assert.deepEqual(JSON.parse(store.get(STORAGE_KEY)), {
+      sourceLanguage: 'custom-lang-x',
+      targetLanguage: 'zh-Hans',
+      provider: 'bing',
+      format: 'text',
+    })
+    mounted.unmount()
+  })
+})
+
+test('a provider removed from the Host catalog is corrected and persisted', async () => {
+  loadPluginState = await loadPlugin()
+  await withPreferences({ provider: 'google' }, async (store) => {
+    const { mounted } = mountPanel({
+      describe: { ...HOST_DESCRIBE, providers: ['bing'] },
+    })
+    await flushPanel()
+
+    const service = findOne(
+      mounted.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith('-service'),
+      'the service selector',
+    )
+    assert.equal(service.props.value, 'bing')
+    assert.equal(JSON.parse(store.get(STORAGE_KEY)).provider, 'bing')
+    mounted.unmount()
+  })
+})
+
+test('blocked local storage falls back to defaults without breaking the workbench', async () => {
+  loadPluginState = await loadPlugin()
+  const previous = globalThis.localStorage
+  globalThis.localStorage = {
+    getItem() {
+      throw new Error('storage access denied')
+    },
+    setItem() {
+      throw new Error('storage access denied')
+    },
+  }
+  try {
+    const { mounted } = mountPanel()
+    await flushPanel()
+    const service = findOne(
+      mounted.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith('-service'),
+      'the service selector',
+    )
+    const format = findOne(
+      mounted.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith('-format'),
+      'the format selector',
+    )
+    assert.equal(service.props.value, 'bing')
+    assert.equal(format.props.value, 'text')
+    mounted.unmount()
+  } finally {
+    if (previous === undefined) delete globalThis.localStorage
+    else globalThis.localStorage = previous
+  }
+})
 
 test('the bundle registers its sidebar entry and its main panel', async () => {
   loadPluginState = await loadPlugin()

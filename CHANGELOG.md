@@ -8,6 +8,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- Centralize language, provider and format defaults, Host provider reconciliation, and local persistence in a focused `useTranslationPreferences` hook.
 - Extract translation dispatch, request-generation guards, cancellation, result/error state and post-translation Host refresh into a focused `useTranslationRequest` hook.
 - Extract glossary draft state, import/export, Host apply and post-apply result invalidation into a focused `useGlossaryEditor` hook.
 - Extract Host metadata, reconnect subscriptions, retry cancellation and stale-response protection into a focused `useHostConnection` hook.
@@ -19,6 +20,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Read the stored preference object once, reject malformed/array snapshots, and normalize empty or unsupported values while preserving custom language tags.
 - Ignore duplicate same-text submissions before the next render and abort in-flight translation work when the workbench unmounts or resets.
 - Include the active translator in the glossary-apply callback dependencies so warning and success feedback follows locale changes.
 - Pass the active locale translator into the extracted glossary hook and refresh localized clipboard/import feedback when the locale changes.

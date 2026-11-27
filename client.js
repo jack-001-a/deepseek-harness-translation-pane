@@ -477,9 +477,32 @@ window.__ModuleLoader__.load({
         const raw = globalThis.localStorage?.getItem(STORAGE_KEY)
         if (typeof raw !== 'string') return {}
         const parsed = JSON.parse(raw)
-        return parsed !== null && typeof parsed === 'object' ? parsed : {}
+        return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
       } catch {
         return {}
+      }
+    }
+
+    /**
+     * Normalize one stored preference snapshot without discarding custom
+     * language tags that may be supported by a newer Host.
+     * @param value - the parsed storage value.
+     * @returns a complete, safe preference snapshot.
+     */
+    function normalizePreferences(value) {
+      const saved = value !== null && typeof value === 'object' && !Array.isArray(value)
+        ? value
+        : {}
+      const nonEmptyString = (candidate, fallback) =>
+        typeof candidate === 'string' && candidate.trim().length > 0 ? candidate : fallback
+
+      return {
+        sourceLanguage: nonEmptyString(saved.sourceLanguage, 'auto'),
+        targetLanguage: nonEmptyString(saved.targetLanguage, 'zh-Hans'),
+        provider: PROVIDER_CATALOG.some((entry) => entry.id === saved.provider)
+          ? saved.provider
+          : 'bing',
+        format: saved.format === 'json' || saved.format === 'markdown' ? saved.format : 'text',
       }
     }
 
@@ -773,6 +796,57 @@ window.__ModuleLoader__.load({
         })
       }, [])
       return active
+    }
+
+    /**
+     * Own the user's language, provider and translation-format preferences.
+     *
+     * Read storage once, normalize known enum values, preserve non-empty
+     * language tags from older/custom Hosts, and keep the selected provider
+     * inside the currently advertised Host catalog.
+     * @param providers - provider ids advertised by the current Host.
+     * @returns preference values and stable setters.
+     */
+    function useTranslationPreferences({ providers }) {
+      const [preferences, setPreferences] = React.useState(() =>
+        normalizePreferences(readPreferences()),
+      )
+
+      const update = React.useCallback((key, value) => {
+        setPreferences((previous) => {
+          const next = typeof value === 'function' ? value(previous[key]) : value
+          if (Object.is(next, previous[key])) return previous
+          return { ...previous, [key]: next }
+        })
+      }, [])
+      const setSourceLanguage = React.useCallback(
+        (value) => update('sourceLanguage', value),
+        [update],
+      )
+      const setTargetLanguage = React.useCallback(
+        (value) => update('targetLanguage', value),
+        [update],
+      )
+      const setProvider = React.useCallback((value) => update('provider', value), [update])
+      const setFormat = React.useCallback((value) => update('format', value), [update])
+
+      React.useEffect(() => {
+        if (providers.length > 0 && !providers.includes(preferences.provider)) {
+          setProvider(providers[0])
+        }
+      }, [providers, preferences.provider, setProvider])
+
+      React.useEffect(() => {
+        writePreferences(preferences)
+      }, [preferences])
+
+      return {
+        ...preferences,
+        setSourceLanguage,
+        setTargetLanguage,
+        setProvider,
+        setFormat,
+      }
     }
 
     /**
@@ -1179,20 +1253,6 @@ window.__ModuleLoader__.load({
         }
       })
 
-      const [sourceLanguage, setSourceLanguage] = React.useState(
-        () => readPreferences().sourceLanguage ?? 'auto',
-      )
-      const [targetLanguage, setTargetLanguage] = React.useState(
-        () => readPreferences().targetLanguage ?? 'zh-Hans',
-      )
-      const [provider, setProvider] = React.useState(() => {
-        const saved = readPreferences().provider
-        return PROVIDER_CATALOG.some((entry) => entry.id === saved) ? saved : 'bing'
-      })
-      const [format, setFormat] = React.useState(() => {
-        const saved = readPreferences().format
-        return saved === 'json' || saved === 'markdown' ? saved : 'text'
-      })
       const [source, setSource] = React.useState('')
       const [copied, setCopied] = React.useState(false)
       const glossaryDraftDirtyRef = React.useRef(false)
@@ -1201,6 +1261,16 @@ window.__ModuleLoader__.load({
         setGlossaryDraft,
         glossaryDraftDirtyRef,
       })
+      const {
+        sourceLanguage,
+        targetLanguage,
+        provider,
+        format,
+        setSourceLanguage,
+        setTargetLanguage,
+        setProvider,
+        setFormat,
+      } = useTranslationPreferences({ providers: host.providers })
       const {
         output,
         setOutput,
@@ -1237,17 +1307,6 @@ window.__ModuleLoader__.load({
       })
 
       const copiedTimerRef = React.useRef(null)
-      // Keep the Service selector on a provider this Host actually offers.
-      React.useEffect(() => {
-        if (host.providers.length > 0 && !host.providers.includes(provider)) {
-          setProvider(host.providers[0])
-        }
-      }, [host.providers, provider])
-
-      React.useEffect(() => {
-        writePreferences({ sourceLanguage, targetLanguage, provider, format })
-      }, [sourceLanguage, targetLanguage, provider, format])
-
       // Surface terminology problems without making advanced configuration
       // consume the default workbench space.
       React.useEffect(() => {
