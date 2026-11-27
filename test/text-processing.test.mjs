@@ -181,5 +181,5 @@ test('Markdown segmentation preserves reference definition titles on following l
     assert.match(prose, /Translate this paragraph/)
     assert.ok(protectedSource.includes('"Do not translate this continuation title"'))
     assert.equal(prose.includes('continuation title'), false)
-  }
-}))
+   }
+})
