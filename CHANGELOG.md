@@ -40,6 +40,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Share Host metadata refreshes and connection-state subscriptions across mounted panels; cancel shared work only after the final panel unmounts.
 - Keep forced post-translation metadata refreshes authoritative while coalescing concurrent refreshes from sibling panels.
 - Re-read available persisted preferences on panel reopen and discard stale Host metadata after the final panel unmounts.
+- Dispose the Host service idempotently: abort its lifetime, purge cached translations and glossary data, clear in-flight indexes, and reject glossary writes after unload.
 - Ignore malformed optional glossary rows and unknown warning codes at the browser Host boundary instead of misreporting a valid Host snapshot as offline.
 - Prevent swapping an Auto-detected source into the same selected target language after detection.
 - Read the stored preference object once, reject malformed/array snapshots, and normalize empty or unsupported values while preserving custom language tags.

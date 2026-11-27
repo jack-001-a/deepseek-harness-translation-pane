@@ -86,3 +86,8 @@ Post-translation metadata reads supersede an older initial description, while si
 ### Reopening after all panels close
 
 No browser storage or Host connection listener remains attached while there are no mounted panels. On the next mount, available localStorage is re-read so external tab changes made during the closed period are not hidden by an in-memory snapshot; when storage access is unavailable, the last in-memory preferences are retained. The last Host subscriber resets the shared metadata snapshot after aborting work and removing the connection listener, so a reopened panel always starts from a neutral snapshot and reconciles against the current connection state.
+
+
+### Host service disposal
+
+The Host lifecycle disposer delegates to `TranslationPaneService.dispose()`. Disposal is idempotent: it aborts the service lifetime, clears the in-flight index and translation cache (including UTF-8 byte accounting), resets provider-health observations, and releases glossary entries and diagnostics. `setGlossary()` rejects calls after disposal just like translation requests do. The cache itself exposes `clear()` so retained values and byte accounting can be released without replacing the cache object.

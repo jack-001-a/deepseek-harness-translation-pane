@@ -30,6 +30,19 @@ test('TranslationCache replaces an existing entry without double-counting bytes'
   assert.equal(cache.get('key').text, 'second value')
 })
 
+test('TranslationCache.clear releases retained values and byte accounting', () => {
+  const cache = new TranslationCache(4, 2048)
+  cache.set('first', { text: 'private source result' })
+  cache.set('second', { text: 'another private result' })
+  assert.ok(cache.bytes > 0)
+  cache.clear()
+  assert.equal(cache.size, 0)
+  assert.equal(cache.bytes, 0)
+  assert.equal(cache.get('first'), undefined)
+  cache.clear()
+  assert.equal(cache.bytes, 0, 'clear is idempotent')
+})
+
 test('ProviderHealth tracks cooldown, recovery, provider set and reset', () => {
   const health = new ProviderHealth(1000, ['bing', 'google'])
   health.recordFailure('bing', 'provider-unreachable', 5000)

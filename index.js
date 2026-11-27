@@ -372,6 +372,23 @@ export class TranslationPaneService {
   }
 
   /**
+   * End this service lifetime and release all retained user-derived state.
+   *
+   * Abort is synchronous; requests that honour cancellation settle their
+   * cleanup paths asynchronously. Clearing the indexes and cache here makes
+   * disposal deterministic even when this service object remains referenced.
+   */
+  dispose() {
+    if (this.lifetime.signal.aborted) return
+    this.lifetime.abort(new Error('translationPane: the service was unloaded'))
+    this.inflight.clear()
+    this.cache.clear()
+    this.health.reset()
+    this.glossary = Object.freeze([])
+    this.glossaryWarnings = Object.freeze([])
+  }
+
+  /**
    * The routes and limits this deployment can translate with.
    *
    * Deliberately synchronous and free of native provider discovery: the
@@ -427,6 +444,7 @@ export class TranslationPaneService {
    * @returns active entries and any non-fatal overlap/duplicate warnings.
    */
   setGlossary(payload) {
+    if (this.lifetime.signal.aborted) throw this.abortReason(this.lifetime.signal)
     const inspection = parseGlossaryImport(payload)
     if (inspection.errors.length > 0) {
       throw new TranslationPaneError(
@@ -1510,12 +1528,7 @@ export function apply(ctx, config) {
   // The service outlives no request: unloading the plugin aborts everything
   // in flight, so a translation never outlives the bundle that started it.
   ctx.effect(
-    () => async () => {
-      service.lifetime.abort(new Error('translationPane: the service was unloaded'))
-      // Observed health belongs to this instance; an unloaded service must
-      // not leave a failure behind for a future composition to inherit.
-      service.health.reset()
-    },
+    () => () => service.dispose(),
     'dsh-translation-pane: service lifetime',
   )
 

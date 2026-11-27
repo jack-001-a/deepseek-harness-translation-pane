@@ -2315,15 +2315,21 @@ test('response: an oversized stream is rejected without awaiting a stalled cance
   )
 })
 
-test('unload: disposed services reject empty, cached, and new demands', async (t) => {
+test('unload: disposed services reject work and release every retained user-derived value', async (t) => {
   let calls = 0
   mockFetch(async () => {
     calls += 1
     return jsonResponse(bingPayload('ok'))
   }, t)
-  const h = harness()
+  const h = harness({ config: { glossary: [{ source: 'internal', target: '内部' }] } })
   await h.service.translate({ text: 'cached', targetLanguage: 'en' })
+  h.service.health.recordFailure('bing', 'provider-unreachable')
+  assert.ok(h.service.cache.size > 0)
+  assert.ok(h.service.cache.bytes > 0)
+  assert.equal(h.service.glossary.length, 1)
   const cacheHits = h.service.describe().cacheHits
+
+  await h.unload()
   await h.unload()
 
   for (const request of [
@@ -2336,8 +2342,22 @@ test('unload: disposed services reject empty, cached, and new demands', async (t
       (error) => error.message === 'translationPane: the service was unloaded',
     )
   }
+  await assert.rejects(
+    h.service.setGlossary(JSON.stringify([{ source: 'later', target: '稍后' }])),
+    (error) => error.message === 'translationPane: the service was unloaded',
+  )
+
   assert.equal(calls, 1, 'no provider request may start after unload')
   assert.equal(h.service.describe().cacheHits, cacheHits, 'a disposed cache must not serve hits')
+  assert.equal(h.service.cache.size, 0, 'unload must remove cached translations')
+  assert.equal(h.service.cache.bytes, 0, 'unload must reset retained-byte accounting')
+  assert.equal(h.service.inflight.size, 0, 'unload must clear its in-flight index')
+  assert.equal(h.service.glossary.length, 0, 'unload must release configured and imported glossary terms')
+  assert.equal(h.service.glossaryWarnings.length, 0, 'unload must release glossary diagnostics')
+  assert.deepEqual(h.service.health.snapshot(), {
+    bing: { unreachable: false },
+    google: { unreachable: false },
+  })
 })
 
 test('unload: waiters release when a translator ignores abort forever', { timeout: 1000 }, async () => {

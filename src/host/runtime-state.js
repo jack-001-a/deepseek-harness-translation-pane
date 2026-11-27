@@ -58,6 +58,12 @@ export class TranslationCache {
     }
   }
 
+  /** Remove every retained translation and reset byte accounting. */
+  clear() {
+    this.entries.clear()
+    this.bytes = 0
+  }
+
   /** How many entries are retained. */
   get size() {
     return this.entries.size
