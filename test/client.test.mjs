@@ -650,6 +650,48 @@ test('the latest Host description wins when refresh responses arrive out of orde
   mounted.unmount()
 })
 
+test('a successful Host description does not retrigger on metadata state updates', async () => {
+  loadPluginState = await loadPlugin()
+  let descriptions = 0
+  const { mounted } = mountPanel({
+    describe: () => {
+      descriptions += 1
+      return { ...HOST_DESCRIBE, maxTextChars: 1234 }
+    },
+  })
+  await flushPanel()
+
+  assert.equal(descriptions, 1, 'publishing Host metadata must not restart its own refresh effect')
+  assert.ok(textOf(mounted.tree).includes('/ 1234'))
+  mounted.unmount()
+})
+
+test('reconnecting refreshes the Host routing facts', async () => {
+  loadPluginState = await loadPlugin()
+  let descriptions = 0
+  const { mounted, setConnectionState } = mountPanel({
+    describe: () => {
+      descriptions += 1
+      return {
+        ...HOST_DESCRIBE,
+        maxTextChars: descriptions === 1 ? 1234 : 4321,
+      }
+    },
+  })
+  await flushPanel()
+  assert.equal(descriptions, 1)
+
+  setConnectionState('disconnected')
+  await flushPanel()
+  assert.match(textOf(mounted.tree), /Offline/)
+
+  setConnectionState('connected')
+  await flushPanel()
+  assert.equal(descriptions, 2, 'a reconnect must request a fresh Host description')
+  assert.ok(textOf(mounted.tree).includes('/ 4321'))
+  mounted.unmount()
+})
+
 test('disconnect invalidates an in-flight Host description', async () => {
   loadPluginState = await loadPlugin()
   let resolveDescription

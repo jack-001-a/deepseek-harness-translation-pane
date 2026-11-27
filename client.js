@@ -864,7 +864,7 @@ window.__ModuleLoader__.load({
         } finally {
           if (describeAbortRef.current === controller) describeAbortRef.current = null
         }
-      }, [glossaryDraftDirtyRef, setGlossaryDraft])
+      }, [])
 
       React.useEffect(() => {
         mountedRef.current = true
