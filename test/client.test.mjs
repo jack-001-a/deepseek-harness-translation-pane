@@ -2031,5 +2031,9 @@ test('connection lifecycle clears offline during reconnect and ignores duplicate
   await flushPanel()
   assert.equal(descriptions, 2, 'a real transition to connected must refresh Host facts')
   assert.ok(textOf(mounted.tree).includes('/ 4321'))
+
+  setConnectionState('connected')
+  await flushPanel()
+  assert.equal(descriptions, 2, 'a duplicate connected snapshot must not repeat the Host RPC')
   mounted.unmount()
 })
