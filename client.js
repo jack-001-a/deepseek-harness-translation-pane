@@ -868,6 +868,11 @@ window.__ModuleLoader__.load({
             return
           }
           if (snapshot === 'disconnected') {
+            // An older describe() response must not turn the panel online again
+            // after the carrier has already reported a disconnect.
+            describeSeq.current += 1
+            describeAbortRef.current?.abort()
+            describeAbortRef.current = null
             // The carrier dropped: say so at once instead of waiting for the
             // next request to fail.
             setHost((previous) => ({ ...previous, connected: false, offline: true }))
