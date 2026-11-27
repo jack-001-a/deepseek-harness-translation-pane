@@ -1455,3 +1455,61 @@ test('a glossary apply finishing after unmount does not update panel state', asy
   await flushPanel()
   assert.equal(mounted.scheduleCalls, schedulesAtUnmount)
 })
+
+test('language and provider controls preserve swap accessibility and direction changes', async () => {
+  loadPluginState = await loadPlugin()
+  const { mounted } = mountPanel()
+  await flushPanel()
+
+  const controlGroup = findOne(
+    mounted.tree,
+    (node) => node.props?.className === 'dshTr-controls',
+    'the translation control group',
+  )
+  const controls = findAll(controlGroup, (node) => node.type === 'select')
+  assert.equal(controls.length, 4, 'source, target, service and format controls stay grouped')
+
+  const source = findOne(
+    controlGroup,
+    (node) => node.type === 'select' && String(node.props?.id).endsWith('-source'),
+    'the source language selector',
+  )
+  const swap = findOne(
+    controlGroup,
+    (node) => node.type === 'button' && node.props?.className === 'dshTr-swap',
+    'the language swap control',
+  )
+  const reason = findOne(
+    mounted.tree,
+    (node) => node.type === 'p' && String(node.props?.className).includes('dshTr-note') && node.props?.id,
+    'the swap explanation',
+  )
+  assert.equal(swap.props['aria-disabled'], 'true')
+  assert.equal(swap.props['aria-describedby'], reason.props.id)
+  assert.match(swap.props['aria-label'], /Auto detect/)
+
+  source.props.onChange({ target: { value: 'en' } })
+  await flushPanel()
+  const enabledSwap = findOne(
+    mounted.tree,
+    (node) => node.type === 'button' && node.props?.className === 'dshTr-swap',
+    'the enabled language swap control',
+  )
+  assert.equal(enabledSwap.props['aria-disabled'], undefined)
+  enabledSwap.props.onClick()
+  await flushPanel()
+
+  const currentSource = findOne(
+    mounted.tree,
+    (node) => node.type === 'select' && String(node.props?.id).endsWith('-source'),
+    'the updated source language selector',
+  )
+  const currentTarget = findOne(
+    mounted.tree,
+    (node) => node.type === 'select' && String(node.props?.id).endsWith('-target'),
+    'the updated target language selector',
+  )
+  assert.equal(currentSource.props.value, 'zh-Hans')
+  assert.equal(currentTarget.props.value, 'en')
+  mounted.unmount()
+})

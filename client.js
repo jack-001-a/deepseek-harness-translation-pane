@@ -1273,6 +1273,114 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Render the language, provider and format controls as a controlled view.
+     * Direction changes stay owned by TranslationPane; this component only
+     * renders the current values and forwards user actions.
+     * @param props - current preferences, options and event callbacks.
+     * @returns the workbench control group.
+     */
+    function TranslationControls(props) {
+      const {
+        ids,
+        sourceLanguage,
+        targetLanguage,
+        provider,
+        format,
+        sourceOptions,
+        targetOptions,
+        serviceOptions,
+        pending,
+        setSourceLanguage,
+        setTargetLanguage,
+        setProvider,
+        setFormat,
+        renderLanguage,
+        swapReason,
+        swap,
+        t,
+      } = props
+      const swapLabel = swapReason === null ? t('action.swap') : t(swapReason)
+
+      return h(
+        'div',
+        { className: 'dshTr-controls' },
+        h(Field, {
+          id: ids.source,
+          label: t('field.source'),
+          value: sourceLanguage,
+          options: sourceOptions,
+          disabled: pending,
+          onChange: setSourceLanguage,
+          renderOption: renderLanguage,
+        }),
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dshTr-swap',
+            title: swapLabel,
+            'aria-label': swapLabel,
+            'aria-describedby': swapReason === null ? undefined : ids.note,
+            // aria-disabled keeps the control focusable so keyboard users
+            // can reach it and hear why it cannot act.
+            'aria-disabled': swapReason === null ? undefined : 'true',
+            onClick: () => {
+              if (swapReason === null) swap()
+            },
+          },
+          h(
+            'svg',
+            {
+              className: 'dshTr-icon',
+              width: 16,
+              height: 16,
+              viewBox: '0 0 16 16',
+              fill: 'none',
+              stroke: 'currentColor',
+              strokeWidth: 1.4,
+              strokeLinecap: 'round',
+              strokeLinejoin: 'round',
+              'aria-hidden': true,
+            },
+            h('path', { d: 'M2.5 5.5h9M9 3l2.5 2.5L9 8' }),
+            h('path', { d: 'M13.5 10.5h-9M7 8l-2.5 2.5L7 13' }),
+          ),
+        ),
+        h(Field, {
+          id: ids.target,
+          label: t('field.target'),
+          value: targetLanguage,
+          options: targetOptions,
+          disabled: pending,
+          onChange: setTargetLanguage,
+          renderOption: renderLanguage,
+        }),
+        h(Field, {
+          id: ids.service,
+          label: t('field.service'),
+          value: provider,
+          options: serviceOptions,
+          disabled: pending || serviceOptions.length <= 1,
+          onChange: setProvider,
+          renderOption: renderLanguage,
+        }),
+        h(Field, {
+          id: ids.format,
+          label: t('field.format'),
+          value: format,
+          options: [
+            { id: 'text', label: t('format.text') },
+            { id: 'json', label: t('format.json') },
+            { id: 'markdown', label: t('format.markdown') },
+          ],
+          disabled: pending,
+          onChange: setFormat,
+          renderOption: (option) => option.label,
+        }),
+      )
+    }
+
+    /**
      * The translation workbench.
      * @param props - the slot props, carrying the bound translator.
      * @returns the workbench element.
@@ -1569,83 +1677,25 @@ window.__ModuleLoader__.load({
             stateLabel,
           ),
         ),
-        h(
-          'div',
-          { className: 'dshTr-controls' },
-          h(Field, {
-            id: ids.source,
-            label: t('field.source'),
-            value: sourceLanguage,
-            options: sourceOptions,
-            disabled: pending,
-            onChange: setSourceLanguage,
-            renderOption: renderLanguage,
-          }),
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dshTr-swap',
-              title: swapReason === null ? t('action.swap') : t(swapReason),
-              'aria-label': swapReason === null ? t('action.swap') : t(swapReason),
-              'aria-describedby': swapReason === null ? undefined : ids.note,
-              // `aria-disabled` keeps the control focusable, so a keyboard
-              // user can reach it and hear why it cannot act.
-              'aria-disabled': swapReason === null ? undefined : 'true',
-              onClick: () => {
-                if (swapReason === null) swap()
-              },
-            },
-            h(
-              'svg',
-              {
-                className: 'dshTr-icon',
-                width: 16,
-                height: 16,
-                viewBox: '0 0 16 16',
-                fill: 'none',
-                stroke: 'currentColor',
-                strokeWidth: 1.4,
-                strokeLinecap: 'round',
-                strokeLinejoin: 'round',
-                'aria-hidden': true,
-              },
-              h('path', { d: 'M2.5 5.5h9M9 3l2.5 2.5L9 8' }),
-              h('path', { d: 'M13.5 10.5h-9M7 8l-2.5 2.5L7 13' }),
-            ),
-          ),
-          h(Field, {
-            id: ids.target,
-            label: t('field.target'),
-            value: targetLanguage,
-            options: targetOptions,
-            disabled: pending,
-            onChange: setTargetLanguage,
-            renderOption: renderLanguage,
-          }),
-          h(Field, {
-            id: ids.service,
-            label: t('field.service'),
-            value: provider,
-            options: serviceOptions,
-            disabled: pending || serviceOptions.length <= 1,
-            onChange: setProvider,
-            renderOption: renderLanguage,
-          }),
-          h(Field, {
-            id: ids.format,
-            label: t('field.format'),
-            value: format,
-            options: [
-              { id: 'text', label: t('format.text') },
-              { id: 'json', label: t('format.json') },
-              { id: 'markdown', label: t('format.markdown') },
-            ],
-            disabled: pending,
-            onChange: setFormat,
-            renderOption: (option) => option.label,
-          }),
-        ),
+        h(TranslationControls, {
+          ids,
+          sourceLanguage,
+          targetLanguage,
+          provider,
+          format,
+          sourceOptions,
+          targetOptions,
+          serviceOptions,
+          pending,
+          setSourceLanguage,
+          setTargetLanguage,
+          setProvider,
+          setFormat,
+          renderLanguage,
+          swapReason,
+          swap,
+          t,
+        }),
         format === 'json'
           ? h('p', { className: 'dshTr-note', role: 'note' }, t('note.json'))
           : format === 'markdown'
