@@ -17,6 +17,8 @@
 
 ## 安装
 
+需要 Node.js `>=22`，以及 DeepSeek Harness `>=0.2.2-rc.4 <0.2.3-0`。该 Harness 版本范围与仓库中的固定版本运行时兼容性测试一致，并通过 `package.json` 的 `engines.dsh` 声明。
+
 通过 Harness 插件市场搜索 **Translation Pane**，或执行：
 
 ```bash
