@@ -60,6 +60,35 @@ export function markdownSegments(source) {
     lineStart = fenceEnd
   }
 
+  // Reference-style link definitions are opaque: translating their label,
+  // destination or title would disconnect every use of that reference.
+  const referenceDefinitions = new Set()
+  const definitionPattern = /^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:<[^>\n]*>|[^ \t\n]+)(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\))?)?[ \t]*$/gm
+  for (const match of source.matchAll(definitionPattern)) {
+    referenceDefinitions.add(match[1].trim().replace(/\s+/g, ' ').toLowerCase())
+    add(match.index, match.index + match[0].length)
+  }
+
+  // Translate a reference link's visible label, but preserve its delimiters
+  // and reference identifier. Images remain opaque like inline images.
+  const referenceLinks = /(!?)\[([^\]\n]+)\](?:\[([^\]\n]*)\])?/g
+  for (const match of source.matchAll(referenceLinks)) {
+    const linkStart = match.index
+    const linkEnd = linkStart + match[0].length
+    if (source[linkEnd] === '(') continue // Inline links are handled below.
+    const identifier = match[3] === undefined || match[3] === '' ? match[2] : match[3]
+    const normalized = identifier.trim().replace(/\s+/g, ' ').toLowerCase()
+    if (!referenceDefinitions.has(normalized)) continue
+    if (match[1] === '!') {
+      add(linkStart, linkEnd)
+      continue
+    }
+    const labelStart = linkStart + 1
+    const labelEnd = labelStart + match[2].length
+    add(linkStart, labelStart)
+    add(labelEnd, linkEnd)
+  }
+
   // Inline code, template tokens, HTML, autolinks, bare URLs and entities.
   addMatches(/(\x60+)[^\n]*?\1/g)
   addMatches(/\{\{[\s\S]*?\}\}/g)
