@@ -70,3 +70,6 @@ The glossary editor owns an AbortController for its active Host mutation. Unmoun
 ### Shared preferences and imports
 
 Translation preferences live in a factory-scoped shared snapshot and notify every mounted panel when one field changes. Persistence writes the merged current snapshot, so one panel cannot overwrite a sibling panel's newer preference with stale fields. Glossary imports use a monotonically increasing request sequence: the most recently selected file wins even when an earlier file read resolves later, and unmount invalidates outstanding reads.
+
+
+Preference changes are also synchronized between same-origin browser tabs through one shared `storage` listener per plugin context. The listener is installed while at least one panel is mounted, filters unrelated storage areas and keys, normalizes incoming snapshots and is removed after the last panel unmounts. Incoming events update local subscribers without writing back to storage.

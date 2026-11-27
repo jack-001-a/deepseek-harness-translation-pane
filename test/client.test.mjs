@@ -945,6 +945,76 @@ test('simultaneous panel instances keep DOM ids and translation cancellation iso
   second.unmount()
 })
 
+test('storage events synchronize preferences across tabs without echoing the write', async () => {
+  loadPluginState = await loadPlugin()
+  const previousAdd = globalThis.addEventListener
+  const previousRemove = globalThis.removeEventListener
+  const listeners = new Set()
+  globalThis.addEventListener = (type, listener) => {
+    if (type === 'storage') listeners.add(listener)
+  }
+  globalThis.removeEventListener = (type, listener) => {
+    if (type === 'storage') listeners.delete(listener)
+  }
+
+  await withPreferences({
+    sourceLanguage: 'auto',
+    targetLanguage: 'zh-Hans',
+    provider: 'bing',
+    format: 'text',
+  }, async (store) => {
+    const { registrations, dictionaries } = applyPlugin(loadPluginState.plugin, 'en')
+    const table = dictionaries[NS].en
+    const t = (key) => table[key] ?? key
+    const page = registrations.main.component
+    const first = mount(page, { t })
+    const second = mount(page, { t })
+    await flushPanel()
+
+    assert.equal(listeners.size, 1, 'all mounted panels should share one storage listener')
+    const external = {
+      sourceLanguage: 'de',
+      targetLanguage: 'ja',
+      provider: 'google',
+      format: 'markdown',
+    }
+    const event = {
+      key: STORAGE_KEY,
+      newValue: JSON.stringify(external),
+      storageArea: globalThis.localStorage,
+    }
+    for (const listener of [...listeners]) listener(event)
+    await flushPanel()
+
+    const value = (owner, suffix) => findOne(
+      owner.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith(suffix),
+      `the ${suffix} selector`,
+    ).props.value
+    for (const panel of [first, second]) {
+      assert.equal(value(panel, '-source'), 'de')
+      assert.equal(value(panel, '-target'), 'ja')
+      assert.equal(value(panel, '-service'), 'google')
+      assert.equal(value(panel, '-format'), 'markdown')
+    }
+    assert.equal(
+      JSON.parse(store.get(STORAGE_KEY)).sourceLanguage,
+      'auto',
+      'an inbound storage event must not be echoed into this tab’s storage',
+    )
+
+    first.unmount()
+    assert.equal(listeners.size, 1, 'the listener remains while another panel is mounted')
+    second.unmount()
+    assert.equal(listeners.size, 0, 'the last panel removes the shared listener')
+  })
+
+  if (previousAdd === undefined) delete globalThis.addEventListener
+  else globalThis.addEventListener = previousAdd
+  if (previousRemove === undefined) delete globalThis.removeEventListener
+  else globalThis.removeEventListener = previousRemove
+})
+
 test('simultaneous panels share preference changes without overwriting other fields', async () => {
   loadPluginState = await loadPlugin()
   await withPreferences({

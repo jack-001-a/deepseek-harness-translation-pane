@@ -1005,6 +1005,7 @@ function resolveProviderPresentation(options) {
     // against the latest value and every mounted panel sees the same choice.
     let sharedPreferencesSnapshot = null
     const preferenceSubscribers = new Set()
+    let preferenceStorageListening = false
 
     function getSharedPreferences() {
       if (sharedPreferencesSnapshot === null) {
@@ -1013,10 +1014,56 @@ function resolveProviderPresentation(options) {
       return sharedPreferencesSnapshot
     }
 
+    function notifyPreferenceSubscribers(next) {
+      for (const subscriber of [...preferenceSubscribers]) subscriber(next)
+    }
+
+    function handlePreferenceStorage(event) {
+      if (event?.key !== STORAGE_KEY && event?.key !== null) return
+      try {
+        const storage = globalThis.localStorage
+        if (event.storageArea != null && event.storageArea !== storage) return
+      } catch {
+        return
+      }
+
+      let saved = {}
+      if (event.key === STORAGE_KEY && typeof event.newValue === 'string') {
+        try {
+          saved = JSON.parse(event.newValue)
+        } catch {
+          // Treat malformed external snapshots like an empty preference file.
+        }
+      }
+      const next = normalizePreferences(saved, PROVIDER_CATALOG)
+      sharedPreferencesSnapshot = next
+      // Storage events are inbound notifications; never echo them back to
+      // localStorage or another tab.
+      notifyPreferenceSubscribers(next)
+    }
+
+    function subscribeSharedPreferences(subscriber) {
+      preferenceSubscribers.add(subscriber)
+      if (
+        !preferenceStorageListening &&
+        typeof globalThis.addEventListener === 'function'
+      ) {
+        globalThis.addEventListener('storage', handlePreferenceStorage)
+        preferenceStorageListening = true
+      }
+      return () => {
+        preferenceSubscribers.delete(subscriber)
+        if (preferenceSubscribers.size === 0 && preferenceStorageListening) {
+          globalThis.removeEventListener?.('storage', handlePreferenceStorage)
+          preferenceStorageListening = false
+        }
+      }
+    }
+
     function publishSharedPreferences(next) {
       sharedPreferencesSnapshot = next
       writePreferences(next)
-      for (const subscriber of [...preferenceSubscribers]) subscriber(next)
+      notifyPreferenceSubscribers(next)
     }
 
     /**
@@ -1049,14 +1096,12 @@ function resolveProviderPresentation(options) {
 
       React.useEffect(() => {
         const sync = (next) => setPreferences(next)
-        preferenceSubscribers.add(sync)
+        const unsubscribe = subscribeSharedPreferences(sync)
         sync(getSharedPreferences())
         // Persist the normalized initial snapshot, but always read the
         // current shared value so a late mount cannot restore stale state.
         writePreferences(getSharedPreferences())
-        return () => {
-          preferenceSubscribers.delete(sync)
-        }
+        return unsubscribe
       }, [])
 
       React.useEffect(() => {
