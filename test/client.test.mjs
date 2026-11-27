@@ -1616,11 +1616,22 @@ test('the extracted glossary view forwards draft edits and Host action state', a
     'the updated glossary editor',
   )
   assert.equal(updatedEditor.props.value, '{"version":1,"glossary":[]}')
+  const updatedPanel = findOne(
+    mounted.tree,
+    (node) => node.props?.className === 'dshTr-glossary',
+    'the updated glossary panel',
+  )
   const apply = findOne(
-    panel,
+    updatedPanel,
     (node) => node.type === 'button' && textOf(node) === 'Apply glossary',
     'the Apply glossary action',
   )
-  assert.equal(apply.props.disabled, true, 'the Host must remain the authority on glossary actions')
+  assert.equal(apply.props.disabled, false, 'a valid draft can be applied when the Host is connected')
+  const exportAction = findOne(
+    updatedPanel,
+    (node) => node.type === 'button' && textOf(node) === 'Copy / export JSON',
+    'the Export glossary action',
+  )
+  assert.equal(exportAction.props.disabled, true, 'an empty active glossary cannot be exported')
   mounted.unmount()
 })
