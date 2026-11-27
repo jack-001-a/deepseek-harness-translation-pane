@@ -945,7 +945,7 @@ window.__ModuleLoader__.load({
         } finally {
           if (mountedRef.current) setGlossaryBusy(false)
         }
-      }, [glossaryBusy, glossaryDraft, host.connected, mountedRef, resetTranslation, setHost])
+      }, [glossaryBusy, glossaryDraft, host.connected, mountedRef, resetTranslation, setHost, t])
 
       const exportGlossary = React.useCallback(async () => {
         if (!mountedRef.current) return
