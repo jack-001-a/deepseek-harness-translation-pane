@@ -1440,6 +1440,60 @@ test('cancellation: the caller signal ends the demand', async (t) => {
   })
 })
 
+test('cancellation: a late abandoned request cannot overwrite a replacement cache entry', async () => {
+  const h = harness()
+  const pendingRuns = []
+  h.service.run = () => new Promise((resolve) => {
+    pendingRuns.push(resolve)
+  })
+  const request = { text: 'same demand', targetLanguage: 'en' }
+  const caller = new AbortController()
+
+  const abandoned = h.service.translateRequest(request, caller.signal)
+  const abandonedRejected = assert.rejects(
+    abandoned,
+    /the caller no longer wants this result/,
+  )
+  const abandonedEntry = h.service.inflight.values().next().value
+  assert.ok(abandonedEntry, 'the first shared request must be registered')
+  const abandonedWorkRejected = assert.rejects(
+    abandonedEntry.promise,
+    /every caller left the request/,
+  )
+
+  caller.abort(new Error('the caller no longer wants this result'))
+  await abandonedRejected
+
+  const replacement = h.service.translateRequest(request)
+  assert.equal(pendingRuns.length, 2, 'a new caller must not join the abandoned request')
+  const replacementEntry = h.service.inflight.values().next().value
+  assert.ok(replacementEntry)
+  assert.notEqual(replacementEntry, abandonedEntry)
+
+  pendingRuns[1]({
+    text: 'fresh result',
+    sourceLanguage: 'auto',
+    targetLanguage: 'en',
+    provider: 'bing',
+  })
+  const fresh = await replacement
+  assert.equal(fresh.text, 'fresh result')
+
+  // The old upstream work ignores cancellation and settles after the replacement.
+  pendingRuns[0]({
+    text: 'stale result',
+    sourceLanguage: 'auto',
+    targetLanguage: 'en',
+    provider: 'bing',
+  })
+  await abandonedWorkRejected
+
+  const cached = await h.service.translateRequest(request)
+  assert.equal(cached.text, 'fresh result', 'late abandoned work must not overwrite the newer cache entry')
+  assert.equal(cached.cached, true)
+  assert.equal(pendingRuns.length, 2, 'the final read must use the replacement cache entry')
+})
+
 test('cancellation: a signal that is already aborted refuses the demand', async (t) => {
   mockFetch(async () => jsonResponse(bingPayload('ok')), t)
   const h = harness()

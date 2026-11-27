@@ -658,6 +658,9 @@ export class TranslationPaneService {
         // Do not publish a result if unload won the race with a fast path
         // (for example, JSON containing only empty string values).
         if (this.lifetime.signal.aborted) throw this.abortReason(this.lifetime.signal)
+        // The final caller may cancel while an upstream provider is settling.
+        // Never let that late result populate (or overwrite) the shared cache.
+        if (controller.signal.aborted) throw this.abortReason(controller.signal)
         this.cache.set(key, result)
         return result
       } finally {

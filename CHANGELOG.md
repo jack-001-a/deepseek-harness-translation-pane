@@ -137,6 +137,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 - Stop dispatching queued fragments after a provider request fails; allow
   already-running fragments to settle before returning the failure.
+- Prevent late results from abandoned shared requests from populating or overwriting the translation cache after the final caller cancels.
 - Harden cancellation, request coalescing, timeout handling, and service unload
   so abandoned or late work cannot publish stale translations or cache entries.
 - Reject oversized JSON input before parsing or contacting a provider.
