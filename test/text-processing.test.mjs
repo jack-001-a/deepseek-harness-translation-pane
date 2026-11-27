@@ -162,3 +162,22 @@ test('Markdown segmentation protects multiline and unclosed HTML comments', () =
     ['Translate this.\n'],
   )
 })
+
+
+test('Markdown segmentation preserves reference definition titles on following lines', () => {
+  const source = [
+    '[guide]: https://example.test/guide',
+    '  "Do not translate this continuation title"',
+    '',
+    'Read the [guide].',
+    'Translate this paragraph.',
+  ].join('\\n')
+  const segments = markdownSegments(source)
+  assert.equal(segments.map((segment) => segment.text).join(''), source)
+  const prose = segments.filter((segment) => segment.translate).map((segment) => segment.text).join('')
+  const protectedSource = segments.filter((segment) => !segment.translate).map((segment) => segment.text).join('')
+  assert.match(prose, /Read the/)
+  assert.match(prose, /Translate this paragraph/)
+  assert.ok(protectedSource.includes('"Do not translate this continuation title"'))
+  assert.equal(prose.includes('continuation title'), false)
+})
