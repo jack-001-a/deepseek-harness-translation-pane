@@ -2363,6 +2363,39 @@ test('timeout: a response body that ignores abort cannot hold the request open',
   assert.equal(h.service.describe().queuedRequests, 0, 'the request queue must be empty after timeout')
 })
 
+test('timeout: empty response chunks cannot starve the request deadline', { timeout: 1000 }, async (t) => {
+  let pulls = 0
+  let cancelCalled = false
+  mockFetch(async () => {
+    const body = new ReadableStream({
+      pull(controller) {
+        pulls += 1
+        // A stream of empty chunks bypasses the byte cap unless the reader
+        // yields to the event loop and avoids retaining zero-byte Buffers.
+        controller.enqueue(new Uint8Array(0))
+      },
+      cancel() {
+        cancelCalled = true
+      },
+    })
+    return new Response(body)
+  }, t)
+
+  const h = harness({ config: { timeoutMs: 30, attemptTimeoutMs: 1000 } })
+  await assert.rejects(
+    h.service.translate({ text: 'hello', targetLanguage: 'en', provider: 'google' }),
+    (error) => {
+      assert.equal(error.code, 'translation-pane/timeout')
+      assert.equal(error.details.timeoutMs, 30)
+      return true
+    },
+  )
+  assert.ok(pulls >= 128, 'the test must exercise the cooperative-yield path')
+  assert.equal(cancelCalled, true, 'the endless stream must receive best-effort cancellation')
+  assert.equal(h.service.describe().activeRequests, 0, 'the provider slot must be released after timeout')
+  assert.equal(h.service.describe().queuedRequests, 0, 'the request queue must be empty after timeout')
+})
+
 test('timeout: the shipped translator preserves the request deadline during cancellation', async () => {
   for (const settle of ['reject', 'resolve']) {
     const translator = fakeTranslator({

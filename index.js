@@ -82,6 +82,10 @@ const DEFAULT_RETRY_BASE_MS = 250
 const DEFAULT_RETRY_MAX_MS = 4000
 /** Largest response body accepted from an anonymous endpoint. */
 const DEFAULT_MAX_RESPONSE_BYTES = 1024 * 1024
+/** Yield to timers while consuming highly fragmented response streams. */
+const RESPONSE_READ_YIELD_INTERVAL = 128
+/** Coalesce small stream chunks to bound per-chunk Buffer overhead. */
+const RESPONSE_READ_BATCH_SIZE = 1024
 /** Translated documents kept for reuse. */
 const DEFAULT_CACHE_SIZE = 64
 /** Approximate UTF-8 byte budget for retained cache keys and translated text. */
@@ -1280,8 +1284,11 @@ export class TranslationPaneService {
       )
     }
     const reader = body.getReader()
+    const batches = []
     const chunks = []
+    let chunkBytes = 0
     let bytes = 0
+    let reads = 0
     let completed = false
     try {
       for (;;) {
@@ -1292,15 +1299,35 @@ export class TranslationPaneService {
           completed = true
           break
         }
-        bytes += chunk.value.byteLength
-        if (bytes > limit) {
-          throw new TranslationPaneError(
-            CODE.invalidResponse,
-            `translationPane: the ${provider} response exceeds ${limit} bytes`,
-            { provider, limit },
-          )
+        reads += 1
+        const chunkBytesRead = chunk.value.byteLength
+        if (chunkBytesRead > 0) {
+          bytes += chunkBytesRead
+          if (bytes > limit) {
+            throw new TranslationPaneError(
+              CODE.invalidResponse,
+              `translationPane: the ${provider} response exceeds ${limit} bytes`,
+              { provider, limit },
+            )
+          }
+          // Empty chunks carry no data and must not allocate retained Buffers.
+          // Coalesce tiny chunks periodically so a byte-bounded body also has
+          // bounded per-chunk object overhead.
+          chunks.push(Buffer.from(chunk.value))
+          chunkBytes += chunkBytesRead
+          if (chunks.length >= RESPONSE_READ_BATCH_SIZE) {
+            batches.push(Buffer.concat(chunks, chunkBytes))
+            chunks.length = 0
+            chunkBytes = 0
+          }
         }
-        chunks.push(Buffer.from(chunk.value))
+
+        // A malicious stream can continuously enqueue empty or tiny chunks.
+        // A byte limit alone does not stop that loop from starving timer and
+        // abort callbacks; periodically yield back to the event loop.
+        if (reads % RESPONSE_READ_YIELD_INTERVAL === 0) {
+          await this.race(new Promise((resolve) => setImmediate(resolve)), signal)
+        }
       }
     } catch (error) {
       // Cancellation is best-effort: a hostile stream's cancel hook may itself
@@ -1321,7 +1348,8 @@ export class TranslationPaneService {
         reader.releaseLock()
       } catch {}
     }
-    return Buffer.concat(chunks).toString('utf8')
+    if (chunks.length > 0) batches.push(Buffer.concat(chunks, chunkBytes))
+    return Buffer.concat(batches, bytes).toString('utf8')
   }
 
   /**

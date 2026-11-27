@@ -32,6 +32,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Yield during highly fragmented response reads, discard empty chunks and coalesce small chunks so a byte-bounded stream cannot starve deadlines or retain excessive per-chunk overhead.
 - Treat RPC success payloads without a string translation as invalid responses instead of displaying a false empty success.
 - Clear stale offline presentation during the Host's `connecting` phase, abort superseded metadata reads, and ignore duplicate connection-state notifications.
 - Abort in-flight glossary activation when its panel unmounts, and reject duplicate same-turn apply clicks before the busy state rerenders.
