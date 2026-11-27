@@ -106,6 +106,10 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
   line with the configuration contract.
 - Honor valid `Retry-After` delays independently of the local exponential
   back-off ceiling, while keeping the whole-request deadline authoritative.
+- Race streamed response-body reads against request cancellation and deadlines;
+  cancel stalled readers best-effort without waiting for an untrusted stream hook.
+- Remove cancellation listeners as soon as a raced operation aborts, even when
+  the underlying promise never settles.
 
 ### Changed
 

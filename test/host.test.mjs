@@ -2305,6 +2305,40 @@ test('timeout: a request deadline after response headers preserves the structure
   assert.equal(calls, 1, 'an overall request deadline must not fail over to another provider')
 })
 
+test('timeout: a response body that ignores abort cannot hold the request open', { timeout: 1000 }, async (t) => {
+  let calls = 0
+  let cancelCalled = false
+  mockFetch(async () => {
+    calls += 1
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('['))
+        // Never close or error, and deliberately ignore the fetch signal.
+      },
+      cancel() {
+        cancelCalled = true
+        // A broken provider must not be able to hold up cleanup either.
+        return new Promise(() => {})
+      },
+    })
+    return new Response(body)
+  }, t)
+
+  const h = harness({ config: { timeoutMs: 30, attemptTimeoutMs: 1000 } })
+  await assert.rejects(
+    h.service.translate({ text: 'hello', targetLanguage: 'en', provider: 'google' }),
+    (error) => {
+      assert.equal(error.code, 'translation-pane/timeout')
+      assert.equal(error.details.timeoutMs, 30)
+      return true
+    },
+  )
+  assert.equal(calls, 1, 'a request-wide timeout must not fail over')
+  assert.equal(cancelCalled, true, 'the stalled reader must receive best-effort cancellation')
+  assert.equal(h.service.describe().activeRequests, 0, 'the provider slot must be released after timeout')
+  assert.equal(h.service.describe().queuedRequests, 0, 'the request queue must be empty after timeout')
+})
+
 test('timeout: the shipped translator preserves the request deadline during cancellation', async () => {
   for (const settle of ['reject', 'resolve']) {
     const translator = fakeTranslator({

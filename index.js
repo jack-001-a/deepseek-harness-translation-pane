@@ -725,17 +725,21 @@ export class TranslationPaneService {
     if (signal === undefined || signal === null) return promise
     if (signal.aborted) return Promise.reject(this.abortReason(signal))
     return new Promise((resolve, reject) => {
-      const onAbort = () => reject(this.abortReason(signal))
+      let settled = false
+      const cleanup = () => signal.removeEventListener('abort', onAbort)
+      const finish = (callback, value) => {
+        if (settled) return
+        settled = true
+        cleanup()
+        callback(value)
+      }
+      const onAbort = () => finish(reject, this.abortReason(signal))
       signal.addEventListener('abort', onAbort, { once: true })
-      promise.then(
-        (value) => {
-          signal.removeEventListener('abort', onAbort)
-          resolve(value)
-        },
-        (error) => {
-          signal.removeEventListener('abort', onAbort)
-          reject(error)
-        },
+      // Close the race between the initial check and listener registration.
+      if (signal.aborted) onAbort()
+      Promise.resolve(promise).then(
+        (value) => finish(resolve, value),
+        (error) => finish(reject, error),
       )
     })
   }
@@ -1217,7 +1221,7 @@ export class TranslationPaneService {
     }
     let body
     try {
-      body = await this.readBody(response, this.config.maxResponseBytes, provider)
+      body = await this.readBody(response, this.config.maxResponseBytes, provider, signal)
     } catch (error) {
       // Fetch aborts body consumption when its signal fires after headers.
       // Preserve the request's structured timeout/cancellation reason rather
@@ -1246,9 +1250,11 @@ export class TranslationPaneService {
    * @param response - the fetch response.
    * @param limit - the largest accepted body, in bytes.
    * @param provider - the provider id, for diagnostics.
+   * @param signal - request cancellation and the overall deadline.
    * @returns the body as text.
    */
-  async readBody(response, limit, provider) {
+  async readBody(response, limit, provider, signal) {
+    if (signal?.aborted) throw this.abortReason(signal)
     const body = response.body
     // Native Fetch responses expose a ReadableStream for non-empty bodies.
     // Calling response.text() on an unknown body shape would buffer the entire
@@ -1264,17 +1270,18 @@ export class TranslationPaneService {
     const reader = body.getReader()
     const chunks = []
     let bytes = 0
+    let completed = false
     try {
       for (;;) {
-        const chunk = await reader.read()
-        if (chunk.done) break
+        // A response body can stall after headers have arrived. Race every
+        // read against the same request deadline/cancellation as fetch().
+        const chunk = await this.race(reader.read(), signal)
+        if (chunk.done) {
+          completed = true
+          break
+        }
         bytes += chunk.value.byteLength
         if (bytes > limit) {
-          // Reject immediately; a hostile stream may never settle its cancel hook.
-          try {
-            const cancellation = reader.cancel()
-            cancellation?.catch?.(() => {})
-          } catch {}
           throw new TranslationPaneError(
             CODE.invalidResponse,
             `translationPane: the ${provider} response exceeds ${limit} bytes`,
@@ -1283,8 +1290,24 @@ export class TranslationPaneService {
         }
         chunks.push(Buffer.from(chunk.value))
       }
+    } catch (error) {
+      // Cancellation is best-effort: a hostile stream's cancel hook may itself
+      // never settle, but it must not hold this request or its provider slot.
+      if (!completed) {
+        try {
+          const cancellation = reader.cancel(error)
+          cancellation?.catch?.(() => {})
+        } catch {}
+      }
+      if (signal?.aborted) throw this.abortReason(signal)
+      throw error
     } finally {
-      reader.releaseLock()
+      // releaseLock can reject an outstanding read after an abort. The read's
+      // promise is already observed by race(), so a lock-release fault is safe
+      // to ignore here.
+      try {
+        reader.releaseLock()
+      } catch {}
     }
     return Buffer.concat(chunks).toString('utf8')
   }
