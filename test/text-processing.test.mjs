@@ -183,3 +183,28 @@ test('Markdown segmentation preserves reference definition titles on following l
     assert.equal(prose.includes('continuation title'), false)
    }
 })
+
+
+test('Markdown segmentation handles CR-only line endings', () => {
+  const newline = '\r'
+  const fence = String.fromCharCode(96).repeat(3)
+  const source = [
+    '[guide]: https://example.test/guide',
+    '  "Do not translate this title"',
+    '',
+    'Read the [guide].',
+    fence + 'js',
+    'const privateValue = "do not translate";',
+    fence,
+    'Translate this sentence.',
+  ].join(newline)
+  const segments = markdownSegments(source)
+  assert.equal(segments.map((segment) => segment.text).join(''), source)
+  const prose = segments.filter((segment) => segment.translate).map((segment) => segment.text).join('')
+  const protectedSource = segments.filter((segment) => !segment.translate).map((segment) => segment.text).join('')
+  assert.match(prose, /Read the/)
+  assert.match(prose, /Translate this sentence/)
+  assert.ok(protectedSource.includes('"Do not translate this title"'))
+  assert.ok(protectedSource.includes(fence + 'js' + newline + 'const privateValue = "do not translate";'))
+  assert.equal(prose.includes('privateValue'), false)
+})
