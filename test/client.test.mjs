@@ -1181,6 +1181,6 @@ test('Host glossary warnings open the advanced glossary section automatically', 
     'the glossary disclosure',
   )
   assert.equal(details.props.open, true)
-  assert.match(textOf(mounted.tree), /Overlapping glossary terms/)
+  assert.match(textOf(mounted.tree), /Overlapping terms detected/)
   mounted.unmount()
 })
