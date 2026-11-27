@@ -1411,6 +1411,72 @@ test('the glossary disclosure uses valid summary content and stays user-toggleab
   mounted.unmount()
 })
  
+test('malformed Host glossary rows are ignored without marking the Host offline', async () => {
+  loadPluginState = await loadPlugin()
+  const { mounted } = mountPanel({
+    describe: {
+      ...HOST_DESCRIBE,
+      glossary: [
+        null,
+        'not-an-entry',
+        { source: '', target: 'empty source' },
+        { source: 'control\\u0000term', target: 'unsafe source' },
+        {
+          source: ' API ',
+          target: ' 接口 ',
+          sourceLanguage: '*',
+          targetLanguage: 'zh-Hans',
+          matchCase: false,
+          wholeWord: null,
+          enabled: true,
+          priority: 0,
+        },
+      ],
+      glossaryWarnings: [
+        null,
+        'not-a-warning',
+        { code: 'unknown-warning' },
+        { code: 'overlapping-terms', message: 'ignored remote message' },
+      ],
+    },
+  })
+  await flushPanel()
+
+  const status = findOne(
+    mounted.tree,
+    (node) => node.props?.className === 'dshTr-status',
+    'the workbench status',
+  )
+  assert.equal(textOf(status), 'Ready', 'invalid optional glossary rows must not fail Host metadata refresh')
+
+  const details = findOne(
+    mounted.tree,
+    (node) => node.type === 'details' && node.props?.className === 'dshTr-glossaryDetails',
+    'the glossary disclosure',
+  )
+  assert.equal(details.props.open, true)
+  const count = findOne(
+    details,
+    (node) => node.props?.className === 'dshTr-glossaryCount',
+    'the normalized glossary count',
+  )
+  assert.equal(textOf(count), '1')
+
+  const editor = findOne(
+    details,
+    (node) => node.type === 'textarea' && node.props?.className === 'dshTr-glossaryArea',
+    'the normalized glossary draft',
+  )
+  assert.deepEqual(JSON.parse(editor.props.value), {
+    version: 1,
+    glossary: [{ source: 'API', target: '接口', targetLanguage: 'zh-Hans' }],
+  })
+  const warnings = findAll(details, (node) => node.type === 'li')
+  assert.equal(warnings.length, 1)
+  assert.match(textOf(warnings[0]), /Overlapping terms detected/)
+  mounted.unmount()
+})
+
 test('Host glossary warnings open the advanced glossary section automatically', async () => {
   loadPluginState = await loadPlugin()
   const { mounted } = mountPanel({

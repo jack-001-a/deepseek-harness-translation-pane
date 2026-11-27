@@ -27,6 +27,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Ignore malformed optional glossary rows and unknown warning codes at the browser Host boundary instead of misreporting a valid Host snapshot as offline.
 - Prevent swapping an Auto-detected source into the same selected target language after detection.
 - Read the stored preference object once, reject malformed/array snapshots, and normalize empty or unsupported values while preserving custom language tags.
 - Ignore duplicate same-text submissions before the next render and abort in-flight translation work when the workbench unmounts or resets.

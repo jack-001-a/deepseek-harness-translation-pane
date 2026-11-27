@@ -533,23 +533,82 @@ window.__ModuleLoader__.load({
       return (key) => key
     }
 
+    /** Warning codes understood by the localized glossary diagnostics. */
+    const GLOSSARY_WARNING_CODES = Object.freeze([
+      'invalid-entry',
+      'too-many-entries',
+      'duplicate-entry',
+      'conflicting-entry',
+      'overlapping-terms',
+    ])
+
+    /**
+     * Normalize plain glossary records received across the Host RPC boundary.
+     *
+     * A compatible Host normally sends validated records, but the browser
+     * boundary must tolerate partial, older or malformed snapshots. Invalid
+     * rows are skipped instead of turning a successful describe call into an
+     * apparent connection failure.
+     * @param glossary - untrusted Host glossary data.
+     * @returns portable glossary records with only supported fields.
+     */
+    function normalizeGlossaryEntries(glossary) {
+      if (!Array.isArray(glossary)) return []
+      return glossary.flatMap((entry) => {
+        if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return []
+        if (typeof entry.source !== 'string' || typeof entry.target !== 'string') return []
+        const source = entry.source.trim()
+        const target = entry.target.trim()
+        if (
+          source.length === 0 ||
+          target.length === 0 ||
+          /[\\u0000-\\u001F\\u007F]/u.test(source) ||
+          /[\\u0000-\\u001F\\u007F]/u.test(target)
+        ) return []
+
+        const normalized = { source, target }
+        if (
+          typeof entry.sourceLanguage === 'string' &&
+          entry.sourceLanguage.trim().length > 0 &&
+          entry.sourceLanguage !== '*'
+        ) normalized.sourceLanguage = entry.sourceLanguage
+        if (
+          typeof entry.targetLanguage === 'string' &&
+          entry.targetLanguage.trim().length > 0 &&
+          entry.targetLanguage !== '*'
+        ) normalized.targetLanguage = entry.targetLanguage
+        if (entry.matchCase === true) normalized.matchCase = true
+        if (typeof entry.wholeWord === 'boolean') normalized.wholeWord = entry.wholeWord
+        if (entry.enabled === false) normalized.enabled = false
+        if (Number.isInteger(entry.priority) && entry.priority >= -1000 && entry.priority <= 1000 && entry.priority !== 0) {
+          normalized.priority = entry.priority
+        }
+        return [normalized]
+      })
+    }
+
+    /**
+     * Keep only warning records the current locale can render.
+     * @param warnings - untrusted Host warning data.
+     * @returns warning records with known localization keys.
+     */
+    function normalizeGlossaryWarnings(warnings) {
+      if (!Array.isArray(warnings)) return []
+      return warnings.filter((warning) =>
+        warning !== null &&
+        typeof warning === 'object' &&
+        !Array.isArray(warning) &&
+        GLOSSARY_WARNING_CODES.includes(warning.code),
+      ).map((warning) => ({ code: warning.code }))
+    }
+
     /**
      * Serialize a glossary into the portable, versioned JSON format.
-     * @param glossary - the normalized glossary entries.
+     * @param glossary - Host glossary entries.
      * @returns formatted JSON suitable for export or editing.
      */
     function glossaryJson(glossary) {
-      const entries = Array.isArray(glossary) ? glossary.map((entry) => ({
-        source: entry.source,
-        target: entry.target,
-        ...(entry.sourceLanguage && entry.sourceLanguage !== '*' ? { sourceLanguage: entry.sourceLanguage } : {}),
-        ...(entry.targetLanguage && entry.targetLanguage !== '*' ? { targetLanguage: entry.targetLanguage } : {}),
-        ...(entry.matchCase === true ? { matchCase: true } : {}),
-        ...(entry.wholeWord === null || entry.wholeWord === undefined ? {} : { wholeWord: entry.wholeWord }),
-        ...(entry.enabled === false ? { enabled: false } : {}),
-        ...(entry.priority ? { priority: entry.priority } : {}),
-      })) : []
-      return JSON.stringify({ version: 1, glossary: entries }, null, 2)
+      return JSON.stringify({ version: 1, glossary: normalizeGlossaryEntries(glossary) }, null, 2)
     }
 
     /**
@@ -922,10 +981,8 @@ window.__ModuleLoader__.load({
                     : null,
                 providerHealth: readProviderHealth(value?.providerHealth),
                 failoverCapable: value?.failover === true,
-                glossary: Array.isArray(value?.glossary) ? value.glossary : [],
-                glossaryWarnings: Array.isArray(value?.glossaryWarnings)
-                  ? value.glossaryWarnings
-                  : [],
+                glossary: normalizeGlossaryEntries(value?.glossary),
+                glossaryWarnings: normalizeGlossaryWarnings(value?.glossaryWarnings),
               })
               if (!glossaryDraftDirtyRef.current) {
                 setGlossaryDraft(glossaryJson(value?.glossary))
@@ -1161,8 +1218,8 @@ window.__ModuleLoader__.load({
         try {
           const value = await callHost(ctx, 'setGlossary', { payload: glossaryDraft })
           if (!mountedRef.current) return
-          const nextGlossary = Array.isArray(value?.glossary) ? value.glossary : []
-          const warnings = Array.isArray(value?.warnings) ? value.warnings : []
+          const nextGlossary = normalizeGlossaryEntries(value?.glossary)
+          const warnings = normalizeGlossaryWarnings(value?.warnings)
           glossaryDraftDirtyRef.current = false
           setGlossaryDraft(glossaryJson(nextGlossary))
           setHost((previous) => ({
