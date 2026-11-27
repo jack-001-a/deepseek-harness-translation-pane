@@ -1514,6 +1514,56 @@ test('language and provider controls preserve swap accessibility and direction c
   mounted.unmount()
 })
 
+test('auto-detected source does not offer a no-op swap when it matches the target', async () => {
+  loadPluginState = await loadPlugin()
+  await withPreferences({ sourceLanguage: 'auto', targetLanguage: 'en' }, async () => {
+    const { mounted } = mountPanel({
+      translate: () => ({
+        text: 'translated text',
+        provider: 'bing',
+        requestedProvider: 'bing',
+        failover: false,
+        detectedSourceLanguage: 'en',
+      }),
+    })
+    await flushPanel()
+    await typeSource(mounted, 'source text')
+    translateButton(mounted.tree).props.onClick()
+    await flushPanel()
+
+    const swap = findOne(
+      mounted.tree,
+      (node) => node.type === 'button' && node.props?.className === 'dshTr-swap',
+      'the unavailable language swap control',
+    )
+    assert.equal(swap.props['aria-disabled'], 'true')
+    assert.match(swap.props['aria-label'], /source and target languages are the same/i)
+
+    const reason = findOne(
+      mounted.tree,
+      (node) => node.type === 'p' && String(node.props?.className).includes('dshTr-note') && node.props?.id,
+      'the same-language swap explanation',
+    )
+    assert.match(textOf(reason), /source and target languages are the same/i)
+
+    swap.props.onClick()
+    await flushPanel()
+    const source = findOne(
+      mounted.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith('-source'),
+      'the source language selector',
+    )
+    const target = findOne(
+      mounted.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith('-target'),
+      'the target language selector',
+    )
+    assert.equal(source.props.value, 'auto')
+    assert.equal(target.props.value, 'en')
+    mounted.unmount()
+  })
+})
+
 test('source editor shortcuts submit and cancel through parent-owned request state', async () => {
   loadPluginState = await loadPlugin()
   let submitted

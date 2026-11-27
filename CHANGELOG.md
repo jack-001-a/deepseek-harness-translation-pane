@@ -26,6 +26,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Prevent swapping an Auto-detected source into the same selected target language after detection.
 - Read the stored preference object once, reject malformed/array snapshots, and normalize empty or unsupported values while preserving custom language tags.
 - Ignore duplicate same-text submissions before the next render and abort in-flight translation work when the workbench unmounts or resets.
 - Include the active translator in the glossary-apply callback dependencies so warning and success feedback follows locale changes.

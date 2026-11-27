@@ -1767,6 +1767,24 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Decide whether reversing the current direction would produce a no-op.
+     *
+     * Auto detect has no effective source language until a translation returns
+     * one. Once detected, that language must differ from the target before a
+     * direction change is useful.
+     * @param options - current request and language-selection state.
+     * @returns the dictionary key for the reason, or null when swapping works.
+     */
+    function resolveLanguageSwapReason({ pending, sourceLanguage, targetLanguage, detectedSource }) {
+      if (pending) return 'swap.pending'
+      if (sourceLanguage === 'auto') {
+        if (typeof detectedSource !== 'string' || detectedSource.trim().length === 0) return 'swap.auto'
+        return detectedSource === targetLanguage ? 'swap.same' : null
+      }
+      return sourceLanguage === targetLanguage ? 'swap.same' : null
+    }
+
+    /**
      * Render the workbench heading and its compact, accessible status pill.
      * @param props - resolved state and the active translator.
      * @returns the page header.
@@ -1996,18 +2014,12 @@ window.__ModuleLoader__.load({
       })
 
       /**
-       * Explain why the swap cannot act, when it cannot.
-       * @returns the dictionary key for the reason, or null when swapping works.
+       * Keep the enabled state and its localized explanation in sync.
        */
-      const swapReason = React.useMemo(() => {
-        if (pending) return 'swap.pending'
-        if (sourceLanguage === 'auto') {
-          // Reversing an auto-detected source needs the detected language.
-          return detectedSource === null ? 'swap.auto' : null
-        }
-        if (sourceLanguage === targetLanguage) return 'swap.same'
-        return null
-      }, [detectedSource, pending, sourceLanguage, targetLanguage])
+      const swapReason = React.useMemo(
+        () => resolveLanguageSwapReason({ pending, sourceLanguage, targetLanguage, detectedSource }),
+        [detectedSource, pending, sourceLanguage, targetLanguage],
+      )
 
       /**
        * Reverse the translation direction.
