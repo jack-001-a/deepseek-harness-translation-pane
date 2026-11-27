@@ -335,9 +335,12 @@ export class TranslationPaneService {
    * @param config - resolved plugin config.
    */
   constructor(ctx, config) {
+    // The glossary is session data, not static runtime configuration. Keep
+    // only one service-owned reference so dispose() can release it completely.
+    const { glossary, glossaryWarnings, ...runtimeConfig } = config
     this.ctx = ctx
     this.name = SERVICE_KEY
-    this.config = config
+    this.config = Object.freeze(runtimeConfig)
     /** Aborted when the plugin unloads, so no request outlives the service. */
     this.lifetime = new AbortController()
     /** Translated documents kept for reuse. */
@@ -361,8 +364,8 @@ export class TranslationPaneService {
     this.cacheHits = 0
     this.cacheMisses = 0
     /** Mutable glossary snapshot; edits are scoped to this Host lifetime. */
-    this.glossary = config.glossary
-    this.glossaryWarnings = config.glossaryWarnings
+    this.glossary = glossary
+    this.glossaryWarnings = glossaryWarnings
     this.glossaryRevision = 0
     this.typertRemote = Object.freeze({
       service: this,

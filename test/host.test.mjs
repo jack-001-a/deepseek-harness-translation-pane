@@ -2327,6 +2327,16 @@ test('unload: disposed services reject work and release every retained user-deri
   assert.ok(h.service.cache.size > 0)
   assert.ok(h.service.cache.bytes > 0)
   assert.equal(h.service.glossary.length, 1)
+  assert.equal(
+    Object.hasOwn(h.service.config, 'glossary'),
+    false,
+    'static runtime configuration must not retain a duplicate glossary reference',
+  )
+  assert.equal(
+    Object.hasOwn(h.service.config, 'glossaryWarnings'),
+    false,
+    'static runtime configuration must not retain duplicate glossary diagnostics',
+  )
   const cacheHits = h.service.describe().cacheHits
 
   await h.unload()
@@ -2358,6 +2368,51 @@ test('unload: disposed services reject work and release every retained user-deri
     bing: { unreachable: false },
     google: { unreachable: false },
   })
+})
+
+test('unload: active and queued translator slots are released', { timeout: 1000 }, async () => {
+  let signalStarted
+  const started = new Promise((resolve) => {
+    signalStarted = resolve
+  })
+  let startedCalls = 0
+  const h = harness({
+    config: { maxConcurrency: 1, maxQueuedRequests: 1 },
+    translator: {
+      maxTextChars: 4000,
+      resolve: (request) => request,
+      // Deliberately ignore abort: the Host must release its own work and
+      // queue bookkeeping even when an upstream implementation is uncooperative.
+      translate: () => {
+        startedCalls += 1
+        signalStarted()
+        return new Promise(() => {})
+      },
+    },
+  })
+
+  const active = h.service.translate({ text: 'active', targetLanguage: 'en' })
+  const activeRejected = assert.rejects(
+    active,
+    (error) => error.message === 'translationPane: the service was unloaded',
+  )
+  await started
+
+  const queued = h.service.translate({ text: 'queued', targetLanguage: 'en' })
+  const queuedRejected = assert.rejects(
+    queued,
+    (error) => error.message === 'translationPane: the service was unloaded',
+  )
+  assert.equal(h.service.describe().activeRequests, 1)
+  assert.equal(h.service.describe().queuedRequests, 1)
+  assert.equal(startedCalls, 1, 'the queued demand must not reach the translator before a slot opens')
+
+  await h.unload()
+  await Promise.all([activeRejected, queuedRejected])
+
+  assert.equal(h.service.describe().activeRequests, 0, 'unload must release every active provider slot')
+  assert.equal(h.service.describe().queuedRequests, 0, 'unload must remove every queued waiter')
+  assert.equal(startedCalls, 1, 'unload must not start queued work')
 })
 
 test('unload: waiters release when a translator ignores abort forever', { timeout: 1000 }, async () => {
