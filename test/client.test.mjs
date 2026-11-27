@@ -736,6 +736,46 @@ test('unmount aborts a pending Host description', async () => {
   assert.equal(requestSignal.aborted, true, 'closing the panel must stop the metadata request')
 })
 
+test('same-text submissions in one event turn share a single request', async () => {
+  loadPluginState = await loadPlugin()
+  let calls = 0
+  const { mounted } = mountPanel({
+    translate: () => {
+      calls += 1
+      return new Promise(() => {})
+    },
+  })
+  await flushPanel()
+  await typeSource(mounted, 'same source')
+  const button = translateButton(mounted.tree)
+  button.props.onClick()
+  button.props.onClick()
+  await flushPanel()
+
+  assert.equal(calls, 1, 'an immediate duplicate click must not restart the active request')
+  mounted.unmount()
+})
+
+test('unmount aborts an active translation request', async () => {
+  loadPluginState = await loadPlugin()
+  let requestSignal
+  const { mounted } = mountPanel({
+    translate: (_args, signal) => {
+      requestSignal = signal
+      return new Promise(() => {})
+    },
+  })
+  await flushPanel()
+  await typeSource(mounted, 'pending translation')
+  translateButton(mounted.tree).props.onClick()
+  await flushPanel()
+
+  assert.ok(requestSignal, 'the translation RPC must receive an AbortSignal')
+  assert.equal(requestSignal.aborted, false)
+  mounted.unmount()
+  assert.equal(requestSignal.aborted, true, 'closing the workbench must abort its translation request')
+})
+
 test('editing the source cancels the request and ignores its late result', async () => {
   loadPluginState = await loadPlugin()
   let resolveTranslation

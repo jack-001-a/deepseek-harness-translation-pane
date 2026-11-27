@@ -8,6 +8,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- Extract translation dispatch, request-generation guards, cancellation, result/error state and post-translation Host refresh into a focused `useTranslationRequest` hook.
 - Extract glossary draft state, import/export, Host apply and post-apply result invalidation into a focused `useGlossaryEditor` hook.
 - Extract Host metadata, reconnect subscriptions, retry cancellation and stale-response protection into a focused `useHostConnection` hook.
 - Remove an unused workbench CSS class and add a regression check for orphaned component styles.
@@ -18,6 +19,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Ignore duplicate same-text submissions before the next render and abort in-flight translation work when the workbench unmounts or resets.
 - Include the active translator in the glossary-apply callback dependencies so warning and success feedback follows locale changes.
 - Pass the active locale translator into the extracted glossary hook and refresh localized clipboard/import feedback when the locale changes.
 - Keep the Host metadata refresh callback stable so publishing connection state cannot recursively retrigger the initial request.

@@ -902,6 +902,149 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Own one translation request lifecycle, independent of the workbench view.
+     *
+     * Request generations prevent late carriers from publishing stale answers;
+     * each active request also receives an AbortSignal and is cancelled on
+     * source reset or component unmount.
+     * @param options - Host refresh, lifecycle guard, locale and clipboard state.
+     * @returns translation state and request actions.
+     */
+    function useTranslationRequest({ mountedRef, describeHost, t, setCopied }) {
+      const [output, setOutput] = React.useState('')
+      const [pending, setPending] = React.useState(false)
+      const [error, setError] = React.useState(null)
+      const [errorTitle, setErrorTitle] = React.useState(null)
+      const [status, setStatus] = React.useState('idle')
+      const [result, setResult] = React.useState(null)
+      const requestSeq = React.useRef(0)
+      const abortRef = React.useRef(null)
+      const inflightTextRef = React.useRef(null)
+
+      const reset = React.useCallback(() => {
+        requestSeq.current += 1
+        abortRef.current?.abort()
+        abortRef.current = null
+        inflightTextRef.current = null
+        setOutput('')
+        setPending(false)
+        setError(null)
+        setErrorTitle(null)
+        setStatus('idle')
+        setResult(null)
+        setCopied(false)
+      }, [])
+
+      const run = React.useCallback(async ({ source, sourceLanguage, targetLanguage, provider, format }) => {
+        if (!mountedRef.current) return
+        if (source.trim().length === 0) {
+          setError(t('error.empty'))
+          setErrorTitle(null)
+          setStatus('failed')
+          return
+        }
+        // The ref is set synchronously before the first await, so two clicks in
+        // the same event turn cannot cancel and restart the same demand.
+        if (inflightTextRef.current === source) return
+
+        requestSeq.current += 1
+        const seq = requestSeq.current
+        abortRef.current?.abort()
+        const controller = new AbortController()
+        abortRef.current = controller
+        inflightTextRef.current = source
+        setOutput('')
+        setResult(null)
+        setPending(true)
+        setStatus('working')
+        setError(null)
+        setErrorTitle(null)
+        setCopied(false)
+        try {
+          const value = await callHost(
+            ctx,
+            'translate',
+            { text: source, sourceLanguage, targetLanguage, provider, format },
+            controller.signal,
+          )
+          if (!mountedRef.current || seq !== requestSeq.current) return
+          setOutput(typeof value?.text === 'string' ? value.text : '')
+          setResult({
+            cached: value?.cached === true,
+            durationMs: typeof value?.durationMs === 'number' ? value.durationMs : null,
+            detectedSourceLanguage:
+              typeof value?.detectedSourceLanguage === 'string'
+                ? value.detectedSourceLanguage
+                : null,
+            provider: typeof value?.provider === 'string' ? value.provider : null,
+            requestedProvider:
+              typeof value?.requestedProvider === 'string' ? value.requestedProvider : null,
+            failover: value?.failover === true,
+            providersServed: Array.isArray(value?.providersServed)
+              ? value.providersServed.filter((entry) => typeof entry === 'string')
+              : [],
+          })
+          setStatus('done')
+          // A completed request may change the provider health shown beside
+          // the controls, so refresh the Host snapshot after publishing it.
+          if (typeof value?.provider === 'string' && value.provider !== 'none') {
+            void describeHost()
+          }
+        } catch (failure) {
+          if (!mountedRef.current || seq !== requestSeq.current) return
+          if (controller.signal.aborted) {
+            setStatus('cancelled')
+            return
+          }
+          setError(messageFor(failure, t))
+          setErrorTitle(diagnosticFor(failure))
+          setStatus('failed')
+        } finally {
+          if (mountedRef.current && seq === requestSeq.current) {
+            inflightTextRef.current = null
+            abortRef.current = null
+            setPending(false)
+          }
+        }
+      }, [describeHost, mountedRef, t])
+
+      const cancel = React.useCallback(() => {
+        if (!mountedRef.current || abortRef.current === null) return
+        requestSeq.current += 1
+        abortRef.current.abort()
+        abortRef.current = null
+        inflightTextRef.current = null
+        setPending(false)
+        setStatus('cancelled')
+        setError(null)
+        setErrorTitle(null)
+      }, [mountedRef])
+
+      React.useEffect(() => () => {
+        requestSeq.current += 1
+        abortRef.current?.abort()
+        abortRef.current = null
+        inflightTextRef.current = null
+      }, [])
+
+      return {
+        output,
+        setOutput,
+        pending,
+        error,
+        setError,
+        errorTitle,
+        setErrorTitle,
+        status,
+        setStatus,
+        result,
+        reset,
+        run,
+        cancel,
+      }
+    }
+
+    /**
      * Own the glossary editor draft and its Host import/export actions.
      *
      * The Host remains authoritative: applying a draft validates it, reports
@@ -1051,27 +1194,28 @@ window.__ModuleLoader__.load({
         return saved === 'json' || saved === 'markdown' ? saved : 'text'
       })
       const [source, setSource] = React.useState('')
-      const [output, setOutput] = React.useState('')
-      const [pending, setPending] = React.useState(false)
-      const [error, setError] = React.useState(null)
-      const [errorTitle, setErrorTitle] = React.useState(null)
       const [copied, setCopied] = React.useState(false)
-      const [status, setStatus] = React.useState('idle')
-      const [result, setResult] = React.useState(null)
       const glossaryDraftDirtyRef = React.useRef(false)
       const [glossaryDraft, setGlossaryDraft] = React.useState('')
       const { host, setHost, describeHost, mountedRef } = useHostConnection({
         setGlossaryDraft,
         glossaryDraftDirtyRef,
       })
-      const resetTranslation = React.useCallback(() => {
-        setOutput('')
-        setResult(null)
-        setCopied(false)
-        setError(null)
-        setErrorTitle(null)
-        setStatus('idle')
-      }, [])
+      const {
+        output,
+        setOutput,
+        pending,
+        error,
+        setError,
+        errorTitle,
+        setErrorTitle,
+        status,
+        setStatus,
+        result,
+        reset: resetTranslation,
+        run,
+        cancel,
+      } = useTranslationRequest({ mountedRef, describeHost, t, setCopied })
       const {
         glossaryBusy,
         glossaryMessage,
@@ -1092,12 +1236,6 @@ window.__ModuleLoader__.load({
         glossaryDraftDirtyRef,
       })
 
-      // The request sequence is the reliable guard against a stale answer:
-      // the carrier may not be able to cancel a request that already reached
-      // the Host, so every response is checked against the latest sequence.
-      const requestSeq = React.useRef(0)
-      const abortRef = React.useRef(null)
-      const inflightTextRef = React.useRef(null)
       const copiedTimerRef = React.useRef(null)
       // Keep the Service selector on a provider this Host actually offers.
       React.useEffect(() => {
@@ -1120,9 +1258,6 @@ window.__ModuleLoader__.load({
         () => () => {
           // Abandon any in-flight request and clear the copy timer, so a
           // closed panel never keeps a timer alive and never redraws.
-          requestSeq.current += 1
-          abortRef.current?.abort()
-          abortRef.current = null
           if (copiedTimerRef.current !== null) {
             clearTimeout(copiedTimerRef.current)
             copiedTimerRef.current = null
@@ -1230,115 +1365,6 @@ window.__ModuleLoader__.load({
       }, [detectedSource, pending, sourceLanguage, targetLanguage])
 
       /**
-       * Send the current text to the Host and publish the answer.
-       * @returns nothing; the result lands in the component state.
-       */
-      const run = React.useCallback(async () => {
-        if (source.trim().length === 0) {
-          setError(t('error.empty'))
-          setErrorTitle(null)
-          setStatus('failed')
-          return
-        }
-        if (pending && inflightTextRef.current === source) {
-          // The very same text is already in flight; restarting it would abort
-          // a healthy request for nothing.
-          return
-        }
-        // Supersede whatever is running. The sequence is bumped before the
-        // abort, so the abandoned request is already stale when its promise
-        // rejects; the signal then tears the HTTP call down.
-        requestSeq.current += 1
-        const seq = requestSeq.current
-        abortRef.current?.abort()
-        const controller = new AbortController()
-        abortRef.current = controller
-        inflightTextRef.current = source
-        // Never leave a previous answer beside a new in-flight request.
-        setOutput('')
-        setResult(null)
-        setPending(true)
-        setStatus('working')
-        setError(null)
-        setErrorTitle(null)
-        setCopied(false)
-        try {
-          const value = await callHost(
-            ctx,
-            'translate',
-            {
-              text: source,
-              sourceLanguage,
-              targetLanguage,
-              provider,
-              format,
-            },
-            controller.signal,
-          )
-          if (seq !== requestSeq.current) return
-          setOutput(typeof value?.text === 'string' ? value.text : '')
-          setResult({
-            cached: value?.cached === true,
-            durationMs: typeof value?.durationMs === 'number' ? value.durationMs : null,
-            detectedSourceLanguage:
-              typeof value?.detectedSourceLanguage === 'string'
-                ? value.detectedSourceLanguage
-                : null,
-            // The served service and the fallback facts, when the Host reports
-            // them; an older Host leaves them null and the panel stays quiet.
-            provider: typeof value?.provider === 'string' ? value.provider : null,
-            requestedProvider:
-              typeof value?.requestedProvider === 'string' ? value.requestedProvider : null,
-            failover: value?.failover === true,
-            // Present only when one long demand was split across providers.
-            providersServed: Array.isArray(value?.providersServed)
-              ? value.providersServed.filter((entry) => typeof entry === 'string')
-              : [],
-          })
-          setStatus('done')
-          // Refresh the Host's view so the notice and the health facts agree:
-          // a failover proves the selected service is unhealthy, and a
-          // successful answer can prove one has recovered.
-          if (typeof value?.provider === 'string' && value.provider !== 'none') {
-            void describeHost()
-          }
-        } catch (failure) {
-          if (seq !== requestSeq.current) return
-          if (controller.signal.aborted) {
-            setStatus('cancelled')
-            return
-          }
-          setError(messageFor(failure, t))
-          setErrorTitle(diagnosticFor(failure))
-          setStatus('failed')
-        } finally {
-          // Only the newest request owns the pending state.
-          if (seq === requestSeq.current) {
-            inflightTextRef.current = null
-            setPending(false)
-          }
-        }
-      }, [describeHost, format, pending, provider, source, sourceLanguage, t, targetLanguage])
-
-      /**
-       * Abandon the running request and leave the panel in a clean state.
-       * @returns nothing.
-       */
-      const cancel = React.useCallback(() => {
-        if (!pending) return
-        // Bump the sequence first: the abandoned answer must be ignored even
-        // when the carrier answers it anyway.
-        requestSeq.current += 1
-        abortRef.current?.abort()
-        abortRef.current = null
-        inflightTextRef.current = null
-        setPending(false)
-        setStatus('cancelled')
-        setError(null)
-        setErrorTitle(null)
-      }, [pending])
-
-      /**
        * Reverse the translation direction.
        * @returns nothing.
        */
@@ -1391,12 +1417,8 @@ window.__ModuleLoader__.load({
        */
       const clear = React.useCallback(() => {
         setSource('')
-        setOutput('')
-        setResult(null)
-        setError(null)
-        setErrorTitle(null)
-        setStatus('idle')
-      }, [])
+        resetTranslation()
+      }, [resetTranslation])
 
       // The status pill carries a short state label; the alert region carries
       // the full sentence, so the pill is never the only signal.
@@ -1585,17 +1607,12 @@ window.__ModuleLoader__.load({
                 // appear beside text that was never translated.
                 if (pending) cancel()
                 setSource(event.target.value)
-                setOutput('')
-                setResult(null)
-                setCopied(false)
-                setError(null)
-                setErrorTitle(null)
-                setStatus('idle')
+                resetTranslation()
               },
               onKeyDown: (event) => {
                 if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
                   event.preventDefault()
-                  void run()
+                  void run({ source, sourceLanguage, targetLanguage, provider, format })
                   return
                 }
                 if (event.key === 'Escape' && pending) {
@@ -1716,7 +1733,7 @@ window.__ModuleLoader__.load({
               // counter is also where an over-limit refusal is stated.
               'aria-describedby': `${ids.hint} ${ids.counter}`,
               onClick: () => {
-                void run()
+                void run({ source, sourceLanguage, targetLanguage, provider, format })
               },
             },
             pending ? t('action.translating') : error !== null ? t('action.retry') : t('action.translate'),
