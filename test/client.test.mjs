@@ -175,6 +175,8 @@ function applyPlugin(plugin, locale, options = {}) {
   const generators = {}
   const describe = options.describe ?? HOST_DESCRIBE
   const translate = options.translate ?? (() => ({ text: '' }))
+  const stateListeners = new Set()
+  let stateSnapshot = options.connectionState ?? 'connected'
   const services = {
     locale: {
       register: (namespace, dicts) => {
@@ -186,7 +188,13 @@ function applyPlugin(plugin, locale, options = {}) {
       subscribe: () => () => {},
     },
     connection: {
-      state: { getSnapshot: () => options.connectionState ?? 'connected' },
+      state: {
+        getSnapshot: () => stateSnapshot,
+        subscribe: (listener) => {
+          stateListeners.add(listener)
+          return () => stateListeners.delete(listener)
+        },
+      },
       rpc: {
         call: (_channel, endpoint, payload, signal) => {
           if (endpoint === 'translationPane/describe') {
@@ -242,7 +250,15 @@ function applyPlugin(plugin, locale, options = {}) {
       assert.equal(step.done, false, `${name} must yield its slot registration`)
     }
   }
-  return { registrations, dictionaries, services }
+  return {
+    registrations,
+    dictionaries,
+    services,
+    setConnectionState: (snapshot) => {
+      stateSnapshot = snapshot
+      for (const listener of stateListeners) listener()
+    },
+  }
 }
 
 /**
@@ -354,7 +370,7 @@ function renderPanel(locale, options = {}) {
 function mountPanel(options = {}) {
   const locale = options.locale ?? 'en'
   const { plugin } = loadPluginState
-  const { registrations, dictionaries } = applyPlugin(plugin, locale, options)
+  const { registrations, dictionaries, setConnectionState } = applyPlugin(plugin, locale, options)
   const table = dictionaries[NS][locale]
   const t = (key, params) => {
     const template = table[key] ?? key
@@ -365,7 +381,7 @@ function mountPanel(options = {}) {
   }
   // The `main` slot owns the page component, which renders the panel.
   const page = registrations['main'].component
-  return { mounted: mount(page, { t }), t, locale }
+  return { mounted: mount(page, { t }), t, locale, setConnectionState }
 }
 
 /**
@@ -629,6 +645,34 @@ test('the latest Host description wins when refresh responses arrive out of orde
   await flushPanel()
   assert.ok(textOf(mounted.tree).includes('/ 1234'), 'a stale response must not overwrite the latest Host facts')
 
+  mounted.unmount()
+})
+
+test('disconnect invalidates an in-flight Host description', async () => {
+  loadPluginState = await loadPlugin()
+  let resolveDescription
+  let requestSignal
+  const { mounted, setConnectionState } = mountPanel({
+    describe: (signal) => {
+      requestSignal = signal
+      return new Promise((resolve) => {
+        resolveDescription = resolve
+      })
+    },
+  })
+  await flushPanel()
+  assert.ok(requestSignal, 'the initial Host description must start')
+  setConnectionState('disconnected')
+  await flushPanel()
+  assert.equal(requestSignal.aborted, true, 'disconnect must cancel the stale Host read')
+
+  // Simulate a carrier that delivers a response after its request was aborted.
+  resolveDescription({ ...HOST_DESCRIBE, maxTextChars: 111 })
+  await flushPanel()
+  assert.ok(
+    textOf(mounted.tree).includes('Checking the length limit'),
+    'a late success must not restore stale connected metadata',
+  )
   mounted.unmount()
 })
 
