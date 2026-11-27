@@ -1705,6 +1705,8 @@ test('format, provider and swap guidance render independently without hiding one
       (node) => node.type === 'select' && String(node.props?.id).endsWith('-format'),
       'the format selector',
     )
+    format.props.onChange({ target: { value: 'json' } })
+    await flushPanel()
     const initialFormatNote = findFormatNote()
     assert.match(textOf(initialFormatNote), /JSON mode preserves keys/)
     const providerNotice = findOne(
