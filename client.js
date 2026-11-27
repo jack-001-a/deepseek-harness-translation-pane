@@ -511,17 +511,9 @@ window.__ModuleLoader__.load({
     }
 
     /**
-     * Call one Host method of this bundle.
-     *
-     * The shipped `dsh-client-connection` RPC takes the cancellation signal as
-     * its fourth argument — `call(channel, endpoint, payload, signal)` — and
-     * forwards it to the underlying `fetch`, so aborting a request tears the
-     * HTTP call down instead of merely ignoring its answer.
-     * @param ctx - the client plugin context.
-     * @param method - Host method name on the `translationPane` service.
-     * @param args - named arguments for that method.
-     * @param signal - cancellation signal for this call.
-     * @returns the Host's returned value.
+     * Serialize a glossary into the portable, versioned JSON format.
+     * @param glossary - the normalized glossary entries.
+     * @returns formatted JSON suitable for export or editing.
      */
     function glossaryJson(glossary) {
       const entries = Array.isArray(glossary) ? glossary.map((entry) => ({
@@ -537,6 +529,19 @@ window.__ModuleLoader__.load({
       return JSON.stringify({ version: 1, glossary: entries }, null, 2)
     }
 
+    /**
+     * Call one Host method of this bundle.
+     *
+     * The shipped `dsh-client-connection` RPC takes the cancellation signal as
+     * its fourth argument — `call(channel, endpoint, payload, signal)` — and
+     * forwards it to the underlying `fetch`, so aborting a request tears the
+     * HTTP call down instead of merely ignoring its answer.
+     * @param ctx - the client plugin context.
+     * @param method - Host method name on the `translationPane` service.
+     * @param args - named arguments for that method.
+     * @param signal - cancellation signal for this call.
+     * @returns the Host's returned value.
+     */
     async function callHost(ctx, method, args, signal) {
       const connection = optionalService(ctx, 'connection')
       if (connection === undefined || typeof connection.rpc?.call !== 'function') {

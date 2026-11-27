@@ -22,6 +22,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Documentation
 
+- Correct the browser Host-call and glossary-serialization documentation so each contract sits above its implementation.
 - Remove the stale roadmap that still listed the already-shipped glossary and Markdown features as pending.
 - Bring bilingual feature, shortcut, glossary-session and responsive-layout documentation back in line with the current implementation.
 - Report the provider that actually served a translation in the result metadata after failover, including cache hits.
