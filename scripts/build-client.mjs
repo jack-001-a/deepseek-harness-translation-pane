@@ -36,7 +36,6 @@ if (process.argv.includes('--check')) {
     console.error('client.js is out of date. Run npm run build:client and commit the generated bundle.')
     process.exitCode = 1
   } else {
-    console.log('client.js matches the ordered src/client source parts.')
   }
 } else {
   await writeFile(OUTPUT, generated)
