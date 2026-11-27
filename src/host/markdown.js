@@ -26,35 +26,41 @@ export function markdownSegments(source) {
 
   // Fenced code blocks are protected whole, including opening and closing
   // delimiters. An unclosed fence protects to EOF rather than exposing code.
+  const lineBounds = (start) => {
+    let lineEnd = start
+    while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+      lineEnd += 1
+    }
+    let nextLineStart = lineEnd
+    if (source.startsWith('\r\n', lineEnd)) nextLineStart += 2
+    else if (lineEnd < source.length) nextLineStart += 1
+    return { lineEnd, nextLineStart }
+  }
+
   let lineStart = 0
   while (lineStart < source.length) {
-    const newline = source.indexOf('\n', lineStart)
-    const lineEnd = newline < 0 ? source.length : newline
-    const rawLine = source.slice(lineStart, lineEnd)
-    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+    const currentLine = lineBounds(lineStart)
+    const line = source.slice(lineStart, currentLine.lineEnd)
     const opening = line.match(/^ {0,3}(\x60{3,}|~{3,})/)
     if (opening === null) {
-      lineStart = newline < 0 ? source.length : newline + 1
+      lineStart = currentLine.nextLineStart
       continue
     }
 
     const fenceChar = opening[1][0]
     const fenceLength = opening[1].length
     const fenceUnit = fenceChar === '\x60' ? '\\x60' : '~'
-    const closing = new RegExp('^ {0,3}' + fenceUnit + '{' + fenceLength + ',}[ \t]*$')
-    let cursor = newline < 0 ? source.length : newline + 1
+    const closing = new RegExp('^ {0,3}' + fenceUnit + '{' + fenceLength + ',}[ \\t]*$')
+    let cursor = currentLine.nextLineStart
     let fenceEnd = source.length
     while (cursor < source.length) {
-      const nextNewline = source.indexOf('\n', cursor)
-      const nextEnd = nextNewline < 0 ? source.length : nextNewline
-      let candidate = source.slice(cursor, nextEnd)
-      if (candidate.endsWith('\r')) candidate = candidate.slice(0, -1)
+      const candidateLine = lineBounds(cursor)
+      const candidate = source.slice(cursor, candidateLine.lineEnd)
       if (closing.test(candidate)) {
-        fenceEnd = nextNewline < 0 ? nextEnd : nextNewline + 1
+        fenceEnd = candidateLine.nextLineStart
         break
       }
-      if (nextNewline < 0) break
-      cursor = nextNewline + 1
+      cursor = candidateLine.nextLineStart
     }
     add(lineStart, fenceEnd)
     lineStart = fenceEnd
@@ -63,7 +69,7 @@ export function markdownSegments(source) {
   // Reference-style link definitions are opaque: translating their label,
   // destination or title would disconnect every use of that reference.
   const referenceDefinitions = new Set()
-  const definitionPattern = /^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:<[^>\n]*>|[^ \t\n]+)(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\))?)?[ \t]*$/gm
+  const definitionPattern = /^ {0,3}\[([^\]\r\n]+)\]:[ \t]*(?:<[^>\r\n]*>|[^ \t\r\n]+)(?:[ \t]+(?:"[^"\r\n]*"|'[^'\r\n]*'|\([^\r\n)]*\))?)?[ \t]*$/gm
   for (const match of source.matchAll(definitionPattern)) {
     referenceDefinitions.add(match[1].trim().replace(/\s+/g, ' ').toLowerCase())
     let definitionEnd = match.index + match[0].length
@@ -74,11 +80,10 @@ export function markdownSegments(source) {
       else if (source[nextLineStart] === '\n' || source[nextLineStart] === '\r') nextLineStart += 1
       else nextLineStart = -1
       if (nextLineStart >= 0) {
-        const nextLineEnd = source.indexOf('\n', nextLineStart)
-        const rawTitleLine = source.slice(nextLineStart, nextLineEnd < 0 ? source.length : nextLineEnd)
-        const titleLine = rawTitleLine.endsWith('\r') ? rawTitleLine.slice(0, -1) : rawTitleLine
-        if (/^ {0,3}(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\))[ \t]*$/.test(titleLine)) {
-          definitionEnd = nextLineEnd < 0 ? source.length : nextLineEnd + 1
+        const titleLineBounds = lineBounds(nextLineStart)
+        const titleLine = source.slice(nextLineStart, titleLineBounds.lineEnd)
+        if (/^ {0,3}(?:"[^"\r\n]*"|'[^'\r\n]*'|\([^\r\n)]*\))[ \t]*$/.test(titleLine)) {
+          definitionEnd = titleLineBounds.nextLineStart
         }
       }
     }
@@ -87,7 +92,7 @@ export function markdownSegments(source) {
 
   // Translate a reference link's visible label, but preserve its delimiters
   // and reference identifier. Images remain opaque like inline images.
-  const referenceLinks = /(!?)\[([^\]\n]+)\](?:\[([^\]\n]*)\])?/g
+  const referenceLinks = /(!?)\[([^\]\r\n]+)\](?:\[([^\]\r\n]*)\])?/g
   for (const match of source.matchAll(referenceLinks)) {
     const linkStart = match.index
     const linkEnd = linkStart + match[0].length
