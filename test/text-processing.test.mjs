@@ -132,3 +132,33 @@ test('Markdown segmentation preserves reference-style link definitions and ident
     assert.equal(prose.includes(token), false, token + ' must not be sent for translation')
   }
 });
+
+
+test('Markdown segmentation protects multiline and unclosed HTML comments', () => {
+  const source = [
+    'Translate this sentence.',
+    '<!-- translator note:',
+    'Do not translate this hidden annotation or {{runtime.value}}.',
+    '-->',
+    'Translate this sentence too.',
+  ].join('\n')
+  const segments = markdownSegments(source)
+  assert.equal(segments.map((segment) => segment.text).join(''), source)
+
+  const prose = segments.filter((segment) => segment.translate).map((segment) => segment.text).join('')
+  const protectedSource = segments.filter((segment) => !segment.translate).map((segment) => segment.text).join('')
+  assert.match(prose, /Translate this sentence/)
+  assert.match(prose, /Translate this sentence too/)
+  assert.ok(protectedSource.includes('<!-- translator note:'))
+  assert.ok(protectedSource.includes('Do not translate this hidden annotation'))
+  assert.ok(protectedSource.includes('{{runtime.value}}'))
+  assert.equal(prose.includes('hidden annotation'), false)
+
+  const unclosed = 'Translate this.\n<!-- unfinished comment\nprivate annotation'
+  const unclosedSegments = markdownSegments(unclosed)
+  assert.equal(unclosedSegments.map((segment) => segment.text).join(''), unclosed)
+  assert.deepEqual(
+    unclosedSegments.filter((segment) => segment.translate).map((segment) => segment.text),
+    ['Translate this.\n'],
+  )
+})
