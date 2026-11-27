@@ -16,6 +16,7 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const h = React.createElement
 
+    // Client source part: locale dictionaries, catalogs and theme-aware stylesheet.
     const NS = 'ybbmm.dsh-translation-pane'
     const PANEL_ID = 'translation-pane'
     const PLUGIN = '@ybbmm/dsh-translation-pane'
@@ -440,6 +441,8 @@ window.__ModuleLoader__.load({
 `
 
     /** One Host failure, carrying the stable code the Host raised. */
+
+    // Client source part: Host transport, preferences, glossary normalization and display utilities.
     class HostError extends Error {
       /**
        * @param code - the Host's stable error code, empty when there is none.
@@ -866,6 +869,8 @@ window.__ModuleLoader__.load({
      * The active locale id, kept live across language switches.
      * @returns the active locale id.
      */
+
+    // Client source part: locale, Host, translation and glossary lifecycle hooks.
     function useActiveLocale() {
       const read = () => {
         try {
@@ -1359,6 +1364,8 @@ window.__ModuleLoader__.load({
      * @param props - the derived notice text.
      * @returns the status message, or nothing when there is no notice.
      */
+
+    // Client source part: reusable workbench controls, cards, status and metadata views.
     function ProviderStatusNotice({ notice }) {
       return notice === null ? null : h('p', { className: 'dshTr-notice', role: 'status' }, notice)
     }
@@ -1938,6 +1945,8 @@ window.__ModuleLoader__.load({
      * @param props - the slot props, carrying the bound translator.
      * @returns the workbench element.
      */
+
+    // Client source part: workbench composition, responsive page and plugin registration.
     function TranslationPane(props) {
       // The slot renderer injects `t` from the registered locale namespace; a
       // missing injection would otherwise render every label blank.
@@ -2418,5 +2427,6 @@ window.__ModuleLoader__.load({
         )
       },
     }
+
   },
 })

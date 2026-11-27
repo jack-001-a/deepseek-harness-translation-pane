@@ -29,9 +29,11 @@
     "dsh": ">=0.2.2-rc.4 <0.2.3-0"
   },
   "scripts": {
-    "check": "node --check index.js && node --check src/host/fair-semaphore.js && node --check src/host/retry-after.js && node --check client.js && node --check src/host/runtime-state.js && node --check src/host/text.js && node --check src/host/markdown.js && node --check src/host/glossary.js && node --check scripts/run-harness-compatibility.mjs && node --check scripts/glossary-cli.mjs && node --check scripts/glossary-sarif.mjs && node --check scripts/run-glossary-action.mjs && node --check scripts/run-glossary-policy-review-action.mjs",
+    "check": "node scripts/build-client.mjs --check && node --check scripts/build-client.mjs && node --check index.js && node --check src/host/fair-semaphore.js && node --check src/host/retry-after.js && node --check client.js && node --check src/host/runtime-state.js && node --check src/host/text.js && node --check src/host/markdown.js && node --check src/host/glossary.js && node --check scripts/run-harness-compatibility.mjs && node --check scripts/glossary-cli.mjs && node --check scripts/glossary-sarif.mjs && node --check scripts/run-glossary-action.mjs && node --check scripts/run-glossary-policy-review-action.mjs",
     "test": "node --test",
-    "glossary": "node scripts/glossary-cli.mjs"
+    "glossary": "node scripts/glossary-cli.mjs",
+    "build:client": "node scripts/build-client.mjs",
+    "prepack": "node scripts/build-client.mjs --check"
   },
   "exports": {
     ".": "./index.js",
@@ -43,6 +45,8 @@
   "files": [
     "index.js",
     "client.js",
+    "src/client/*.part.js",
+    "scripts/build-client.mjs",
     "cordis.patch.yml",
     "locale/*.json",
     "icon.svg",

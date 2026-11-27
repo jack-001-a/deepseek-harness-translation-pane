@@ -129,9 +129,12 @@ Agent 工具也支持：
 需要 Node.js 22 或更高版本：
 
 ```bash
-npm run check
+npm run build:client # 修改 src/client 源文件后生成 client.js
+npm run check        # 验证生成文件与 JavaScript 语法
 npm test
 ```
+
+浏览器端源码拆分在 `src/client/`，由无第三方依赖的构建脚本按固定顺序组装为 Harness 所需的单文件 `client.js`。架构边界和构建约定见 [客户端架构说明](docs/client-architecture.md)。
 
 测试使用 fake Cordis context 和 stubbed fetch，不需要安装 Harness，也不会访问真实翻译服务。
 

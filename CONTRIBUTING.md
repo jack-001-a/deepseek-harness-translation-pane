@@ -52,6 +52,7 @@ Before opening a pull request:
 - Preserve stable error codes or document intentional changes.
 - Never log source text, translated text, credentials or other user content.
 - If adding an internal runtime module, include it in the `package.json` `files` allowlist and syntax-check script.
+- For browser changes, edit the ordered source parts in `src/client/`, run `npm run build:client`, and commit the generated `client.js`; do not add runtime-relative imports. See [Client architecture](docs/client-architecture.md).
 
 ## Compatibility notes
 

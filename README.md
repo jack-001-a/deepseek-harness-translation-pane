@@ -502,8 +502,16 @@ surface. Desktop cards are capped at 560px and narrow cards at 440px.
 ## Development
 
 ```bash
-npm test        # node --test
+npm run build:client # after editing src/client source parts
+npm run check        # verifies the generated bundle and JavaScript syntax
+npm test             # node --test
 ```
+
+The browser source is split into ordered, dependency-free parts under
+`src/client/`; the build script assembles them into the single
+ModuleLoader-compatible `client.js`. See
+[Client architecture](docs/client-architecture.md) for the source boundaries
+and build contract.
 
 The fast unit suite uses a fake Cordis context and a stubbed `fetch`; it needs
 no Harness installation and no network. Pull requests also run a separate
