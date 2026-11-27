@@ -150,3 +150,132 @@ export function resolveLanguageSwapReason({ pending, sourceLanguage, targetLangu
   }
   return sourceLanguage === targetLanguage ? 'swap.same' : null
 }
+
+
+/**
+ * Normalize a stored preference snapshot without discarding custom language
+ * tags that may be supported by a newer Host.
+ * @param {unknown} value - the parsed storage value.
+ * @param {Array<string|{id?: string}>} providerCatalog - supported providers.
+ * @returns {{sourceLanguage:string,targetLanguage:string,provider:string,format:string}}
+ */
+export function normalizePreferences(value, providerCatalog) {
+  const saved = value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value
+    : {}
+  const nonEmptyString = (candidate, fallback) =>
+    typeof candidate === 'string' && candidate.trim().length > 0 ? candidate : fallback
+  const providerIds = Array.isArray(providerCatalog)
+    ? providerCatalog.map((entry) => typeof entry === 'string' ? entry : entry?.id)
+    : []
+
+  return {
+    sourceLanguage: nonEmptyString(saved.sourceLanguage, 'auto'),
+    targetLanguage: nonEmptyString(saved.targetLanguage, 'zh-Hans'),
+    provider: providerIds.includes(saved.provider) ? saved.provider : 'bing',
+    format: saved.format === 'json' || saved.format === 'markdown' ? saved.format : 'text',
+  }
+}
+
+/**
+ * Build language picker options using local labels for known languages and
+ * readable ids for future/custom Host languages.
+ * @param {unknown} ids - Host-advertised language ids.
+ * @param {boolean} includeAuto - whether Auto detect is available.
+ * @param {Array<{id:string,label?:string,zh?:string}>} catalog - local labels.
+ * @returns {Array<{id:string,label:string,zh:string}>}
+ */
+export function languageOptions(ids, includeAuto, catalog) {
+  const entries = Array.isArray(catalog) ? catalog : []
+  const known = new Map(entries.map((entry) => [entry.id, entry]))
+  const advertised = uniqueCatalogIds(ids)
+  const source = advertised.length > 0 ? advertised : entries.map((entry) => entry.id)
+  const options = []
+  for (const id of source) {
+    if (id === 'auto' && !includeAuto) continue
+    options.push(known.get(id) ?? { id, label: id, zh: id })
+  }
+  if (includeAuto && !options.some((entry) => entry.id === 'auto')) {
+    options.unshift(known.get('auto') ?? { id: 'auto', label: 'Auto detect', zh: '自动检测' })
+  }
+  return options
+}
+
+/**
+ * Build provider picker options from the Host's route-specific capabilities.
+ * An empty Host catalog retains the historical single-provider fallback.
+ * @param {unknown} ids - Host-advertised provider ids.
+ * @param {Array<{id:string,label?:string,zh?:string}>} catalog - local labels.
+ * @returns {Array<{id:string,label:string,zh:string}>}
+ */
+export function providerOptions(ids, catalog) {
+  const entries = Array.isArray(catalog) ? catalog : []
+  const advertised = uniqueCatalogIds(ids)
+  if (advertised.length === 0) return entries.slice(0, 1)
+  const known = new Map(entries.map((entry) => [entry.id, entry]))
+  return advertised.map((id) => known.get(id) ?? { id, label: id, zh: id })
+}
+
+/**
+ * Normalize the Host's serializable provider-health snapshot. A null-prototype
+ * dictionary prevents special property names from changing its prototype.
+ * @param {unknown} value - the Host's providerHealth field.
+ * @returns {Record<string, {unreachable:boolean}>}
+ */
+export function normalizeProviderHealth(value) {
+  const health = Object.create(null)
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return health
+  for (const [provider, entry] of Object.entries(value)) {
+    if (
+      provider.trim().length === 0 ||
+      entry === null ||
+      typeof entry !== 'object' ||
+      Array.isArray(entry) ||
+      typeof entry.unreachable !== 'boolean'
+    ) continue
+    health[provider] = { unreachable: entry.unreachable }
+  }
+  return health
+}
+
+/**
+ * Resolve provider notices and result-service metadata from request facts.
+ * @param {object} options - provider health, response metadata and translators.
+ * @returns {{notice:string|null,servedLabel:string}}
+ */
+export function resolveProviderPresentation(options) {
+  const {
+    pending,result,provider,providerHealth,failoverCapable,error,providerLabel,providerName,t,
+  } = options
+  const degradedProvider = providerHealth?.[provider]?.unreachable === true
+  const mixedServed =
+    !pending && Array.isArray(result?.providersServed) && result.providersServed.length > 1
+      ? result.providersServed
+      : null
+
+  let notice = null
+  if (mixedServed !== null) {
+    notice = t('notice.mixed', { providers: mixedServed.map(providerName).join(' + ') })
+  } else if (
+    !pending &&
+    result?.failover === true &&
+    typeof result.requestedProvider === 'string' &&
+    typeof result.provider === 'string' &&
+    (result.requestedProvider === provider || result.provider === provider)
+  ) {
+    notice = t('notice.failover', {
+      requested: providerName(result.requestedProvider),
+      served: providerName(result.provider),
+    })
+  } else if (degradedProvider && failoverCapable && error === null) {
+    notice = t('notice.providerDown', { provider: providerName(provider) })
+  }
+
+  const servedLabel =
+    mixedServed !== null
+      ? mixedServed.map(providerName).join(' + ')
+      : typeof result?.provider === 'string' && result.provider.length > 0 && result.provider !== 'none'
+        ? providerName(result.provider)
+        : providerLabel
+  return { notice, servedLabel }
+}

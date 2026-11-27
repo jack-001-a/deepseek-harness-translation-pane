@@ -29,7 +29,7 @@
      */
     function useTranslationPreferences({ providers }) {
       const [preferences, setPreferences] = React.useState(() =>
-        normalizePreferences(readPreferences()),
+        normalizePreferences(readPreferences(), PROVIDER_CATALOG),
       )
 
       const update = React.useCallback((key, value) => {
@@ -119,7 +119,7 @@
                   typeof value?.maxTextChars === 'number' && value.maxTextChars > 0
                     ? value.maxTextChars
                     : null,
-                providerHealth: readProviderHealth(value?.providerHealth),
+                providerHealth: normalizeProviderHealth(value?.providerHealth),
                 failoverCapable: value?.failover === true,
                 glossary: normalizeGlossaryEntries(value?.glossary),
                 glossaryWarnings: normalizeGlossaryWarnings(value?.glossaryWarnings),
@@ -440,53 +440,6 @@
      * @param options - the current request, Host health and localized labels.
      * @returns the notice text and service label for result metadata.
      */
-    function resolveProviderPresentation(options) {
-      const {
-        pending,
-        result,
-        provider,
-        providerHealth,
-        failoverCapable,
-        error,
-        providerLabel,
-        providerName,
-        t,
-      } = options
-      const degradedProvider = providerHealth?.[provider]?.unreachable === true
-      const mixedServed =
-        !pending && Array.isArray(result?.providersServed) && result.providersServed.length > 1
-          ? result.providersServed
-          : null
-
-      let notice = null
-      if (mixedServed !== null) {
-        notice = t('notice.mixed', { providers: mixedServed.map(providerName).join(' + ') })
-      } else if (
-        !pending &&
-        result?.failover === true &&
-        typeof result.requestedProvider === 'string' &&
-        typeof result.provider === 'string' &&
-        (result.requestedProvider === provider || result.provider === provider)
-      ) {
-        notice = t('notice.failover', {
-          requested: providerName(result.requestedProvider),
-          served: providerName(result.provider),
-        })
-      } else if (degradedProvider && failoverCapable && error === null) {
-        // Only promise an automatic switch when the Host can actually make one.
-        notice = t('notice.providerDown', { provider: providerName(provider) })
-      }
-
-      // Metadata follows the service (or services) that actually answered.
-      const servedLabel =
-        mixedServed !== null
-          ? mixedServed.map(providerName).join(' + ')
-          : typeof result?.provider === 'string' && result.provider.length > 0 && result.provider !== 'none'
-            ? providerName(result.provider)
-            : providerLabel
-      return { notice, servedLabel }
-    }
-
     /**
      * Render a provider warning as an announced status message.
      * @param props - the derived notice text.

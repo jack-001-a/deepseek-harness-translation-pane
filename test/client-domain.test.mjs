@@ -5,6 +5,11 @@ import {
   GLOSSARY_WARNING_CODES,
   normalizeGlossaryEntries,
   normalizeGlossaryWarnings,
+  normalizePreferences,
+  normalizeProviderHealth,
+  languageOptions,
+  providerOptions,
+  resolveProviderPresentation,
   resolveLanguageSwapReason,
   resolveWorkbenchStatus,
   uniqueCatalogIds,
@@ -127,4 +132,92 @@ test('domain: workbench status follows one deterministic precedence table', () =
     state: 'offline',
     stateLabel: 'translated:status.offline',
   })
+})
+
+
+test('domain: stored preferences normalize unsupported values but preserve custom languages', () => {
+  const providers = ['bing', 'google']
+  assert.deepEqual(normalizePreferences(null, providers), {
+    sourceLanguage: 'auto', targetLanguage: 'zh-Hans', provider: 'bing', format: 'text',
+  })
+  assert.deepEqual(normalizePreferences([], providers), {
+    sourceLanguage: 'auto', targetLanguage: 'zh-Hans', provider: 'bing', format: 'text',
+  })
+  assert.deepEqual(normalizePreferences({
+    sourceLanguage: ' custom-lang ', targetLanguage: '', provider: 'retired-provider', format: 'xml',
+  }, providers), {
+    sourceLanguage: ' custom-lang ', targetLanguage: 'zh-Hans', provider: 'bing', format: 'text',
+  })
+  assert.deepEqual(normalizePreferences({
+    sourceLanguage: 'ja', targetLanguage: 'en', provider: 'google', format: 'markdown',
+  }, providers), {
+    sourceLanguage: 'ja', targetLanguage: 'en', provider: 'google', format: 'markdown',
+  })
+  assert.equal(normalizePreferences({ provider: 'custom' }, []).provider, 'bing')
+})
+
+test('domain: provider health is normalized into a prototype-safe dictionary', () => {
+  const source = JSON.parse('{"google":{"unreachable":true,"until":"ignored"},"bing":{"unreachable":false},"bad":{"unreachable":"yes"},"empty":null,"__proto__":{"unreachable":true}}')
+  const health = normalizeProviderHealth(source)
+  assert.equal(Object.getPrototypeOf(health), null)
+  assert.deepEqual(health.google, { unreachable: true })
+  assert.deepEqual(health.bing, { unreachable: false })
+  assert.equal(health.bad, undefined)
+  assert.equal(health.empty, undefined)
+  assert.deepEqual(health.__proto__, { unreachable: true })
+  assert.equal(Object.getPrototypeOf(normalizeProviderHealth(null)), null)
+  assert.equal(Object.getPrototypeOf(normalizeProviderHealth([])), null)
+})
+
+test('domain: language and provider options preserve Host order and catalog labels', () => {
+  const languages = [
+    { id: 'auto', label: 'Auto detect', zh: '自动检测' },
+    { id: 'en', label: 'English', zh: '英语' },
+    { id: 'ja', label: 'Japanese', zh: '日语' },
+  ]
+  const providers = [
+    { id: 'bing', label: 'Bing', zh: '必应' },
+    { id: 'google', label: 'Google', zh: '谷歌' },
+  ]
+  assert.deepEqual(languageOptions(['en', 'custom-lang', 'en', '', 42], true, languages), [
+    languages[0], languages[1],
+    { id: 'custom-lang', label: 'custom-lang', zh: 'custom-lang' },
+  ])
+  assert.deepEqual(languageOptions(['auto', 'ja'], false, languages), [languages[2]])
+  assert.deepEqual(languageOptions([], false, languages), [languages[1], languages[2]])
+  assert.deepEqual(providerOptions([], providers), [providers[0]])
+  assert.deepEqual(providerOptions(['google', 'custom-provider', 'google'], providers), [
+    providers[1],
+    { id: 'custom-provider', label: 'custom-provider', zh: 'custom-provider' },
+  ])
+})
+
+test('domain: provider presentation keeps failover notices and served metadata consistent', () => {
+  const providerName = (id) => ({ bing: 'Bing', google: 'Google' })[id] ?? id
+  const t = (key, values) => key + ':' + JSON.stringify(values)
+  const base = {
+    pending: false, result: null, provider: 'bing', providerHealth: {}, failoverCapable: true,
+    error: null, providerLabel: 'Bing', providerName, t,
+  }
+  assert.deepEqual(resolveProviderPresentation({
+    ...base, result: { providersServed: ['bing', 'google'], provider: 'bing' },
+  }), {
+    notice: 'notice.mixed:{"providers":"Bing + Google"}', servedLabel: 'Bing + Google',
+  })
+  assert.deepEqual(resolveProviderPresentation({
+    ...base, result: { failover: true, requestedProvider: 'bing', provider: 'google' },
+  }), {
+    notice: 'notice.failover:{"requested":"Bing","served":"Google"}', servedLabel: 'Google',
+  })
+  assert.deepEqual(resolveProviderPresentation({
+    ...base, provider: 'google', providerHealth: { google: { unreachable: true } },
+  }), {
+    notice: 'notice.providerDown:{"provider":"Google"}', servedLabel: 'Bing',
+  })
+  assert.deepEqual(resolveProviderPresentation({
+    ...base, pending: true, result: { failover: true, requestedProvider: 'bing', provider: 'google' },
+  }), { notice: null, servedLabel: 'Google' })
+  assert.deepEqual(resolveProviderPresentation({
+    ...base, provider: 'google', providerHealth: { google: { unreachable: true } }, failoverCapable: false,
+  }), { notice: null, servedLabel: 'Bing' })
 })

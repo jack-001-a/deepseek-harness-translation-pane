@@ -111,15 +111,15 @@
       )
 
       const sourceOptions = React.useMemo(
-        () => withValue(languageOptions(host.languages, true), sourceLanguage),
+        () => withValue(languageOptions(host.languages, true, LANGUAGE_CATALOG), sourceLanguage),
         [host.languages, sourceLanguage],
       )
       const targetOptions = React.useMemo(
-        () => withValue(languageOptions(host.languages, false), targetLanguage),
+        () => withValue(languageOptions(host.languages, false, LANGUAGE_CATALOG), targetLanguage),
         [host.languages, targetLanguage],
       )
       const serviceOptions = React.useMemo(
-        () => withValue(providerOptions(host.providers), provider),
+        () => withValue(providerOptions(host.providers, PROVIDER_CATALOG), provider),
         [host.providers, provider],
       )
       // The service name as the select shows it, so the meta line and the

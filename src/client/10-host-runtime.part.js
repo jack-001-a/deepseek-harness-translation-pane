@@ -43,29 +43,6 @@
     }
 
     /**
-     * Normalize one stored preference snapshot without discarding custom
-     * language tags that may be supported by a newer Host.
-     * @param value - the parsed storage value.
-     * @returns a complete, safe preference snapshot.
-     */
-    function normalizePreferences(value) {
-      const saved = value !== null && typeof value === 'object' && !Array.isArray(value)
-        ? value
-        : {}
-      const nonEmptyString = (candidate, fallback) =>
-        typeof candidate === 'string' && candidate.trim().length > 0 ? candidate : fallback
-
-      return {
-        sourceLanguage: nonEmptyString(saved.sourceLanguage, 'auto'),
-        targetLanguage: nonEmptyString(saved.targetLanguage, 'zh-Hans'),
-        provider: PROVIDER_CATALOG.some((entry) => entry.id === saved.provider)
-          ? saved.provider
-          : 'bing',
-        format: saved.format === 'json' || saved.format === 'markdown' ? saved.format : 'text',
-      }
-    }
-
-    /**
      * Save the preferences, ignoring a locked-down storage.
      * @param next - the preferences to store.
      * @returns nothing.
@@ -99,60 +76,6 @@
      */
     function glossaryJson(glossary) {
       return JSON.stringify({ version: 1, glossary: normalizeGlossaryEntries(glossary) }, null, 2)
-    }
-
-    /**
-     * Build the option list of one language select.
-     * @param ids - the language ids the Host advertises, possibly empty.
-     * @param includeAuto - whether the "Auto detect" entry is offered.
-     * @returns the option list, keeping the built-in display names.
-     */
-    function languageOptions(ids, includeAuto) {
-      const known = new Map(LANGUAGE_CATALOG.map((entry) => [entry.id, entry]))
-      const advertised = uniqueCatalogIds(ids)
-      const source = advertised.length > 0 ? advertised : LANGUAGE_CATALOG.map((entry) => entry.id)
-      const options = []
-      for (const id of source) {
-        if (id === 'auto' && !includeAuto) continue
-        options.push(known.get(id) ?? { id, label: id, zh: id })
-      }
-      // The source select always offers auto-detection, even when the Host
-      // catalog does not list it.
-      if (includeAuto && !options.some((entry) => entry.id === 'auto')) {
-        options.unshift(known.get('auto'))
-      }
-      return options
-    }
-
-    /**
-     * Build the option list of the service select.
-     * @param ids - the provider ids the active route can serve, possibly empty.
-     * @returns the option list, keeping the built-in display names.
-     */
-    function providerOptions(ids) {
-      const advertised = uniqueCatalogIds(ids)
-      if (advertised.length === 0) return PROVIDER_CATALOG.slice(0, 1)
-      const known = new Map(PROVIDER_CATALOG.map((entry) => [entry.id, entry]))
-      return advertised.map((id) => known.get(id) ?? { id, label: id, zh: id })
-    }
-
-    /**
-     * Read the Host's observed provider health, tolerating an older Host.
-     *
-     * The Host sends plain serializable data keyed by provider id, for
-     * example `{ google: { unreachable: true, until: '…' } }`. An older Host
-     * omits the key entirely, and the panel simply has no health notice.
-     * @param value - the Host's `providerHealth` field, possibly absent.
-     * @returns the health facts the panel can render, keyed by provider id.
-     */
-    function readProviderHealth(value) {
-      if (value === null || typeof value !== 'object' || Array.isArray(value)) return {}
-      const health = {}
-      for (const [provider, entry] of Object.entries(value)) {
-        if (entry === null || typeof entry !== 'object' || typeof entry.unreachable !== 'boolean') continue
-        health[provider] = { unreachable: entry.unreachable }
-      }
-      return health
     }
 
     /**
