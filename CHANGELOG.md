@@ -8,6 +8,8 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Added
 
+- Declare the tested DeepSeek Harness compatibility range in `engines.dsh` and enforce it in CI and release validation.
+
 - Add opt-in Markdown translation for the panel and `translate_text` tool.
   The Host translates prose while preserving code blocks, inline code, link
   destinations, URLs, placeholders, HTML tags, entities and common Markdown
