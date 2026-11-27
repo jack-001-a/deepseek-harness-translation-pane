@@ -67,6 +67,8 @@ jobs:
             'LICENSE',
             'SECURITY.md',
             'src/host/runtime-state.js',
+            'src/host/fair-semaphore.js',
+            'src/host/retry-after.js',
             'src/host/text.js',
             'src/host/markdown.js',
             'src/host/glossary.js',

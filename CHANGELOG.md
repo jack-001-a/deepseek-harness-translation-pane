@@ -8,6 +8,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- Move HTTP retry-hint parsing and bounded FIFO scheduling into focused Host modules, keeping the plugin's runtime API unchanged.
 - Remove 31 exact duplicate Host regression tests and guard the suite against duplicate test titles.
 - Refresh the translation workbench with a responsive, theme-token-driven layout, clearer result states, compact metadata, and reduced-motion support.
 - Collapse advanced glossary editing by default; automatically reveal it when Host-reported glossary warnings need attention.
