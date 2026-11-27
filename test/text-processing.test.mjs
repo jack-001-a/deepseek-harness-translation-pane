@@ -100,3 +100,35 @@ test('Markdown segmentation returns no translatable prose for a code-only docume
   assert.equal(segments.map((segment) => segment.text).join(''), source)
   assert.equal(segments.some((segment) => segment.translate), false)
 })
+
+
+test('Markdown segmentation preserves reference-style link definitions and identifiers', () => {
+  const source = [
+    '[guide]: https://example.test/docs "Do not translate this title"',
+    '[reference]: <https://example.test/reference> \'Reference title\'',
+    '',
+    'Read the [installation guide][guide], the [reference][], and [guide] again.',
+    '![diagram][diagram]',
+    '[diagram]: https://example.test/diagram.png "Architecture diagram"',
+  ].join('\n')
+  const segments = markdownSegments(source)
+  assert.equal(segments.map((segment) => segment.text).join(''), source)
+
+  const prose = segments.filter((segment) => segment.translate).map((segment) => segment.text).join('')
+  const protectedSource = segments.filter((segment) => !segment.translate).map((segment) => segment.text).join('')
+
+  for (const label of ['installation guide', 'reference', 'guide again']) {
+    assert.ok(prose.includes(label), label + ' should remain translatable')
+  }
+  for (const token of [
+    '[guide]: https://example.test/docs "Do not translate this title"',
+    '[reference]: <https://example.test/reference> \'Reference title\'',
+    '][guide]',
+    '[]',
+    '![diagram][diagram]',
+    '[diagram]: https://example.test/diagram.png "Architecture diagram"',
+  ]) {
+    assert.ok(protectedSource.includes(token), token + ' must be preserved')
+    assert.equal(prose.includes(token), false, token + ' must not be sent for translation')
+  }
+});
