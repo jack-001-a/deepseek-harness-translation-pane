@@ -630,7 +630,6 @@ test('the latest Host description wins when refresh responses arrive out of orde
   assert.ok(textOf(mounted.tree).includes('/ 1234'), 'a stale response must not overwrite the latest Host facts')
 
   mounted.unmount()
-  assert.equal(signals[1].aborted, true, 'unmount must abort the active metadata refresh')
 })
 
 test('unmount aborts a pending Host description', async () => {
