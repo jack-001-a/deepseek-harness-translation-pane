@@ -66,7 +66,17 @@ export function markdownSegments(source) {
   const definitionPattern = /^ {0,3}\[([^\]\n]+)\]:[ \t]*(?:<[^>\n]*>|[^ \t\n]+)(?:[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\))?)?[ \t]*$/gm
   for (const match of source.matchAll(definitionPattern)) {
     referenceDefinitions.add(match[1].trim().replace(/\s+/g, ' ').toLowerCase())
-    add(match.index, match.index + match[0].length)
+    let definitionEnd = match.index + match[0].length
+    const definitionHasTitle = /[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\))[ \t]*$/.test(match[0])
+    if (!definitionHasTitle && source[definitionEnd] === '\n') {
+      const nextLineStart = definitionEnd + 1
+      const nextLineEnd = source.indexOf('\n', nextLineStart)
+      const titleLine = source.slice(nextLineStart, nextLineEnd < 0 ? source.length : nextLineEnd)
+      if (/^ {0,3}(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\))[ \t]*$/.test(titleLine)) {
+        definitionEnd = nextLineEnd < 0 ? source.length : nextLineEnd + 1
+      }
+    }
+    add(match.index, definitionEnd)
   }
 
   // Translate a reference link's visible label, but preserve its delimiters
