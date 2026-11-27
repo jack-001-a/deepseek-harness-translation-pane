@@ -7,22 +7,26 @@ depend on relative browser imports or on a second network-loaded asset.
 
 ## Source layout
 
-The editable source lives in `src/client/`. The numbered files are ordered
-source parts, not standalone ES modules. The build script inserts them in order
-inside the existing ModuleLoader factory, so they share the factory's lexical
-scope and have no runtime import graph.
+The editable source lives in `src/client/`. The numbered `.part.js` files are
+ordered closure fragments, while `domain.js` is a real dependency-free ES
+module. The browser build strips only the named `export` declarations from
+that domain module and inlines its declarations before the ordered fragments.
+This lets tests import domain rules directly while the browser still has no
+runtime module graph.
 
 | Part | Responsibility |
 |---|---|
 | `00-contracts.part.js` | Locale dictionaries, language/provider catalogs, error and visual contracts, stylesheet |
-| `10-host-runtime.part.js` | Host RPC boundary, preference persistence, glossary normalization, option and clipboard utilities |
+| `domain.js` | Importable pure rules for glossary validation, catalog de-duplication, status precedence and language swapping |
+| `10-host-runtime.part.js` | Host RPC boundary, preference persistence, option and clipboard utilities |
 | `20-state-hooks.part.js` | Locale, Host connection, translation request, glossary editor and provider-presentation state |
 | `30-components.part.js` | Reusable controls, editor/result cards, status, notices, footer, metadata and glossary views |
 | `40-workbench.part.js` | Workbench composition, responsive page observer, sidebar icon and plugin registration |
 
-Add new parts to the explicit ordered list in `scripts/build-client.mjs`. Keep
-shared declarations in the factory scope; do not introduce `import` or
-`export` statements into a part.
+Add new fragments to the explicit ordered list in `scripts/build-client.mjs`.
+Inline modules must be listed in `INLINE_MODULES`, have no imports, and expose
+only named top-level `const` or function declarations. Test importable domain
+rules from their original ES module rather than testing generated copies.
 
 ## Build and validation
 

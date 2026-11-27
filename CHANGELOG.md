@@ -9,6 +9,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 ### Changed
 
 - Split browser client source into ordered, dependency-free parts and add a deterministic single-file build with bundle freshness checks.
+- Extract framework-independent browser rules into an importable domain module with direct unit coverage.
 - Deduplicate Host-advertised language and provider options while preserving their order and custom ids.
 - Centralize language, provider and format defaults, Host provider reconciliation, and local persistence in a focused `useTranslationPreferences` hook.
 - Isolate provider-notice precedence and result-service labeling from the workbench, with an accessible presentational status component.

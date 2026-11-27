@@ -456,66 +456,6 @@
     }
 
     /**
-     * Resolve the compact status, full alert copy and visual state from the
-     * current Host and request snapshot. Keep precedence in one pure function
-     * so the header and alert cannot drift apart as new states are added.
-     * @param options - Host/request facts and the active translator.
-     * @returns the current status pill and alert presentation.
-     */
-    const STATUS_PRESENTATION = Object.freeze({
-      offline: { state: 'offline', label: 'status.offline' },
-      error: { state: 'error', label: 'status.error' },
-      pending: { state: 'working', label: 'status.translating' },
-      limited: { state: 'limited', label: 'status.limited' },
-      cancelled: { state: 'cancelled', label: 'status.cancelled' },
-      connecting: { state: 'connecting', label: 'status.connecting' },
-      ready: { state: 'ready', label: 'status.ready' },
-    })
-
-    function resolveWorkbenchStatus(options) {
-      const { error, offline, pending, overLimit, status, connected, t } = options
-      // One ordered decision drives both the visual state and its spoken label.
-      // Keep offline/error above work-in-progress and input-limit states.
-      const presentation = offline
-        ? STATUS_PRESENTATION.offline
-        : error !== null
-          ? STATUS_PRESENTATION.error
-          : pending
-            ? STATUS_PRESENTATION.pending
-            : overLimit
-              ? STATUS_PRESENTATION.limited
-              : status === 'cancelled'
-                ? STATUS_PRESENTATION.cancelled
-                : !connected
-                  ? STATUS_PRESENTATION.connecting
-                  : STATUS_PRESENTATION.ready
-      const alertMessage = error !== null ? error : offline ? t('error.offline') : null
-      return {
-        alertMessage,
-        state: presentation.state,
-        stateLabel: t(presentation.label),
-      }
-    }
-
-    /**
-     * Decide whether reversing the current direction would produce a no-op.
-     *
-     * Auto detect has no effective source language until a translation returns
-     * one. Once detected, that language must differ from the target before a
-     * direction change is useful.
-     * @param options - current request and language-selection state.
-     * @returns the dictionary key for the reason, or null when swapping works.
-     */
-    function resolveLanguageSwapReason({ pending, sourceLanguage, targetLanguage, detectedSource }) {
-      if (pending) return 'swap.pending'
-      if (sourceLanguage === 'auto') {
-        if (typeof detectedSource !== 'string' || detectedSource.trim().length === 0) return 'swap.auto'
-        return detectedSource === targetLanguage ? 'swap.same' : null
-      }
-      return sourceLanguage === targetLanguage ? 'swap.same' : null
-    }
-
-    /**
      * Render the workbench heading and its compact, accessible status pill.
      * @param props - resolved state and the active translator.
      * @returns the page header.

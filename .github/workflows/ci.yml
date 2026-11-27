@@ -63,6 +63,7 @@ jobs:
             'src/client/20-state-hooks.part.js',
             'src/client/30-components.part.js',
             'src/client/40-workbench.part.js',
+            'src/client/domain.js',
             'scripts/build-client.mjs',
             'cordis.patch.yml',
             'locale/en.json',

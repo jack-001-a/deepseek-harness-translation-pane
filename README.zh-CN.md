@@ -134,7 +134,7 @@ npm run check        # 验证生成文件与 JavaScript 语法
 npm test
 ```
 
-浏览器端源码拆分在 `src/client/`，由无第三方依赖的构建脚本按固定顺序组装为 Harness 所需的单文件 `client.js`。架构边界和构建约定见 [客户端架构说明](docs/client-architecture.md)。
+浏览器端源码拆分在 `src/client/`：包含有序闭包片段，以及可独立导入和测试的纯业务 ES 模块。构建器会内联纯逻辑声明，再生成 Harness 使用的单文件 `client.js`。架构约定见 [客户端架构说明](docs/client-architecture.md)。
 
 测试使用 fake Cordis context 和 stubbed fetch，不需要安装 Harness，也不会访问真实翻译服务。
 
