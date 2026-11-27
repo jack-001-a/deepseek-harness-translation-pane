@@ -761,8 +761,11 @@ window.__ModuleLoader__.load({
       const abortRef = React.useRef(null)
       const inflightTextRef = React.useRef(null)
       const copiedTimerRef = React.useRef(null)
-      // `describe()` retries on a timer; a closed panel must not be redrawn
-      // when a late attempt settles.
+      // Metadata refreshes can overlap (initial load, reconnect, post-translation).
+      // Only the newest response may publish, and unmount cancels both the RPC
+      // and any retry delay still waiting to fire.
+      const describeSeq = React.useRef(0)
+      const describeAbortRef = React.useRef(null)
       const mountedRef = React.useRef(true)
 
       /**
@@ -773,46 +776,80 @@ window.__ModuleLoader__.load({
        * @returns whether the Host answered.
        */
       const describeHost = React.useCallback(async () => {
-        for (let attempt = 0; attempt <= DESCRIBE_RETRY_DELAYS_MS.length; attempt += 1) {
-          if (!mountedRef.current) return false
-          try {
-            const value = await callHost(ctx, 'describe', {})
-            if (!mountedRef.current) return false
-            setHost({
-              connected: true,
-              offline: false,
-              route: typeof value?.route === 'string' ? value.route : null,
-              providers: Array.isArray(value?.providers) ? value.providers : [],
-              languages: Array.isArray(value?.languages) ? value.languages : [],
-              // The limit is the Host's own number; until it arrives the panel
-              // must not claim a limit of its own.
-              limit:
-                typeof value?.maxTextChars === 'number' && value.maxTextChars > 0
-                  ? value.maxTextChars
-                  : null,
-              // Absent on an older Host, which simply means no health notice.
-              providerHealth: readProviderHealth(value?.providerHealth),
-              // Whether the Host can actually fall over to another provider;
-              // a health warning is only honest when it can.
-              failoverCapable: value?.failover === true,
-              glossary: Array.isArray(value?.glossary) ? value.glossary : [],
-              glossaryWarnings: Array.isArray(value?.glossaryWarnings) ? value.glossaryWarnings : [],
-            })
-            if (!glossaryDraftDirtyRef.current) {
-              setGlossaryDraft(glossaryJson(value?.glossary))
-            }
-            return true
-          } catch {
-            if (attempt < DESCRIBE_RETRY_DELAYS_MS.length) {
-              await new Promise((resolve) => setTimeout(resolve, DESCRIBE_RETRY_DELAYS_MS[attempt]))
+        if (!mountedRef.current) return false
+        const seq = ++describeSeq.current
+        describeAbortRef.current?.abort()
+        const controller = new AbortController()
+        describeAbortRef.current = controller
+        const isCurrent = () =>
+          mountedRef.current && seq === describeSeq.current && !controller.signal.aborted
+        try {
+          for (let attempt = 0; attempt <= DESCRIBE_RETRY_DELAYS_MS.length; attempt += 1) {
+            if (!isCurrent()) return false
+            try {
+              const value = await callHost(ctx, 'describe', {}, controller.signal)
+              if (!isCurrent()) return false
+              setHost({
+                connected: true,
+                offline: false,
+                route: typeof value?.route === 'string' ? value.route : null,
+                providers: Array.isArray(value?.providers) ? value.providers : [],
+                languages: Array.isArray(value?.languages) ? value.languages : [],
+                // The limit is the Host's own number; until it arrives the panel
+                // must not claim a limit of its own.
+                limit:
+                  typeof value?.maxTextChars === 'number' && value.maxTextChars > 0
+                    ? value.maxTextChars
+                    : null,
+                // Absent on an older Host, which simply means no health notice.
+                providerHealth: readProviderHealth(value?.providerHealth),
+                // Whether the Host can actually fall over to another provider;
+                // a health warning is only honest when it can.
+                failoverCapable: value?.failover === true,
+                glossary: Array.isArray(value?.glossary) ? value.glossary : [],
+                glossaryWarnings: Array.isArray(value?.glossaryWarnings) ? value.glossaryWarnings : [],
+              })
+              if (!glossaryDraftDirtyRef.current) {
+                setGlossaryDraft(glossaryJson(value?.glossary))
+              }
+              return true
+            } catch {
+              // A superseding refresh or unmount makes this result irrelevant.
+              if (!isCurrent()) return false
+              if (attempt < DESCRIBE_RETRY_DELAYS_MS.length) {
+                const waited = await new Promise((resolve) => {
+                  const signal = controller.signal
+                  let timer
+                  const onAbort = () => {
+                    clearTimeout(timer)
+                    signal.removeEventListener('abort', onAbort)
+                    resolve(false)
+                  }
+                  timer = setTimeout(() => {
+                    signal.removeEventListener('abort', onAbort)
+                    resolve(true)
+                  }, DESCRIBE_RETRY_DELAYS_MS[attempt])
+                  signal.addEventListener('abort', onAbort, { once: true })
+                  if (signal.aborted) onAbort()
+                })
+                if (!waited || !isCurrent()) return false
+              }
             }
           }
+          if (!isCurrent()) return false
+          // The retries are over: say plainly that the Host is out of reach
+          // rather than waiting on "Connecting" forever.
+          setHost((previous) => ({ ...previous, connected: false, offline: carrierUnreachable() }))
+          return false
+        } finally {
+          if (describeAbortRef.current === controller) describeAbortRef.current = null
         }
-        if (!mountedRef.current) return false
-        // The retries are over: say plainly that the Host is out of reach
-        // rather than waiting on "Connecting" forever.
-        setHost((previous) => ({ ...previous, connected: false, offline: carrierUnreachable() }))
-        return false
+      }, [])
+
+      // Strict Mode replays effect setup after cleanup without recreating refs.
+      // Restore the mounted guard before starting the panel's first Host read.
+      React.useEffect(() => {
+        mountedRef.current = true
       }, [])
 
       React.useEffect(() => {
@@ -831,6 +868,11 @@ window.__ModuleLoader__.load({
             return
           }
           if (snapshot === 'disconnected') {
+            // An older describe() response must not turn the panel online again
+            // after the carrier has already reported a disconnect.
+            describeSeq.current += 1
+            describeAbortRef.current?.abort()
+            describeAbortRef.current = null
             // The carrier dropped: say so at once instead of waiting for the
             // next request to fail.
             setHost((previous) => ({ ...previous, connected: false, offline: true }))
@@ -857,6 +899,9 @@ window.__ModuleLoader__.load({
           requestSeq.current += 1
           abortRef.current?.abort()
           abortRef.current = null
+          describeSeq.current += 1
+          describeAbortRef.current?.abort()
+          describeAbortRef.current = null
           if (copiedTimerRef.current !== null) {
             clearTimeout(copiedTimerRef.current)
             copiedTimerRef.current = null

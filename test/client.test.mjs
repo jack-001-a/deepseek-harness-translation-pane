@@ -101,8 +101,15 @@ function createReact() {
         deps === undefined ||
         changed(previous.deps, deps)
       owner.values[index] = { deps: deps === undefined ? undefined : [...deps] }
-      // Effects run after the render, exactly like the browser does.
-      if (isChanged) owner.effects.push(effect)
+      // Effects run after the render, exactly like the browser does. Keep
+      // their cleanup so unmount and Strict Mode replay can be exercised.
+      if (isChanged) {
+        owner.effects.push(() => {
+          owner.cleanups[index]?.()
+          const cleanup = effect()
+          owner.cleanups[index] = typeof cleanup === 'function' ? cleanup : undefined
+        })
+      }
     },
   }
 }
@@ -168,6 +175,8 @@ function applyPlugin(plugin, locale, options = {}) {
   const generators = {}
   const describe = options.describe ?? HOST_DESCRIBE
   const translate = options.translate ?? (() => ({ text: '' }))
+  const stateListeners = new Set()
+  let stateSnapshot = options.connectionState ?? 'connected'
   const services = {
     locale: {
       register: (namespace, dicts) => {
@@ -179,11 +188,18 @@ function applyPlugin(plugin, locale, options = {}) {
       subscribe: () => () => {},
     },
     connection: {
-      state: { getSnapshot: () => options.connectionState ?? 'connected' },
+      state: {
+        getSnapshot: () => stateSnapshot,
+        subscribe: (listener) => {
+          stateListeners.add(listener)
+          return () => stateListeners.delete(listener)
+        },
+      },
       rpc: {
         call: (_channel, endpoint, payload, signal) => {
           if (endpoint === 'translationPane/describe') {
-            return Promise.resolve({ ok: true, value: describe })
+            const value = typeof describe === 'function' ? describe(signal) : describe
+            return Promise.resolve(value).then((resolved) => ({ ok: true, value: resolved }))
           }
           if (endpoint === 'translationPane/translate') {
             return Promise.resolve(translate(payload?.args, signal)).then((value) => {
@@ -234,7 +250,15 @@ function applyPlugin(plugin, locale, options = {}) {
       assert.equal(step.done, false, `${name} must yield its slot registration`)
     }
   }
-  return { registrations, dictionaries, services }
+  return {
+    registrations,
+    dictionaries,
+    services,
+    setConnectionState: (snapshot) => {
+      stateSnapshot = snapshot
+      for (const listener of stateListeners) listener()
+    },
+  }
 }
 
 /**
@@ -248,7 +272,7 @@ function applyPlugin(plugin, locale, options = {}) {
  * @returns the mount handle.
  */
 function mount(Component, props) {
-  const owner = { index: 0, values: [], tree: undefined, scheduled: false, effects: [] }
+  const owner = { index: 0, values: [], tree: undefined, scheduled: false, effects: [], cleanups: [] }
 
   /**
    * Replace every component element with the tree it renders.
@@ -293,6 +317,12 @@ function mount(Component, props) {
     })
   }
   draw()
+  owner.unmount = () => {
+    for (let index = owner.cleanups.length - 1; index >= 0; index -= 1) {
+      owner.cleanups[index]?.()
+      owner.cleanups[index] = undefined
+    }
+  }
   return owner
 }
 
@@ -340,7 +370,7 @@ function renderPanel(locale, options = {}) {
 function mountPanel(options = {}) {
   const locale = options.locale ?? 'en'
   const { plugin } = loadPluginState
-  const { registrations, dictionaries } = applyPlugin(plugin, locale, options)
+  const { registrations, dictionaries, setConnectionState } = applyPlugin(plugin, locale, options)
   const table = dictionaries[NS][locale]
   const t = (key, params) => {
     const template = table[key] ?? key
@@ -351,7 +381,7 @@ function mountPanel(options = {}) {
   }
   // The `main` slot owns the page component, which renders the panel.
   const page = registrations['main'].component
-  return { mounted: mount(page, { t }), t, locale }
+  return { mounted: mount(page, { t }), t, locale, setConnectionState }
 }
 
 /**
@@ -579,6 +609,87 @@ test('a running translation disables translating and can be cancelled', async ()
   )
   assert.equal(textOf(status), 'Cancelled')
   assert.equal(translateButton(mounted.tree).props.disabled, false)
+})
+
+test('the latest Host description wins when refresh responses arrive out of order', async () => {
+  loadPluginState = await loadPlugin()
+  const pendingDescriptions = []
+  const signals = []
+  const { mounted } = mountPanel({
+    describe: (signal) => new Promise((resolve) => {
+      signals.push(signal)
+      pendingDescriptions.push(resolve)
+    }),
+    translate: () => ({
+      text: 'translated',
+      provider: 'bing',
+      requestedProvider: 'bing',
+      failover: false,
+    }),
+  })
+  await flushPanel()
+  assert.equal(pendingDescriptions.length, 1, 'the panel should start with one Host description')
+
+  await typeSource(mounted, 'hello')
+  translateButton(mounted.tree).props.onClick()
+  await flushPanel()
+  assert.equal(pendingDescriptions.length, 2, 'a successful translation should refresh Host metadata')
+  assert.equal(signals[0].aborted, true, 'the newer refresh must cancel the superseded RPC')
+
+  pendingDescriptions[1]({ ...HOST_DESCRIBE, maxTextChars: 1234 })
+  await flushPanel()
+  assert.ok(textOf(mounted.tree).includes('/ 1234'), 'the newer metadata should become visible')
+
+  // Simulate an RPC carrier that still delivers a response after cancellation.
+  pendingDescriptions[0]({ ...HOST_DESCRIBE, maxTextChars: 111 })
+  await flushPanel()
+  assert.ok(textOf(mounted.tree).includes('/ 1234'), 'a stale response must not overwrite the latest Host facts')
+
+  mounted.unmount()
+})
+
+test('disconnect invalidates an in-flight Host description', async () => {
+  loadPluginState = await loadPlugin()
+  let resolveDescription
+  let requestSignal
+  const { mounted, setConnectionState } = mountPanel({
+    describe: (signal) => {
+      requestSignal = signal
+      return new Promise((resolve) => {
+        resolveDescription = resolve
+      })
+    },
+  })
+  await flushPanel()
+  assert.ok(requestSignal, 'the initial Host description must start')
+  setConnectionState('disconnected')
+  await flushPanel()
+  assert.equal(requestSignal.aborted, true, 'disconnect must cancel the stale Host read')
+
+  // Simulate a carrier that delivers a response after its request was aborted.
+  resolveDescription({ ...HOST_DESCRIBE, maxTextChars: 111 })
+  await flushPanel()
+  assert.ok(
+    textOf(mounted.tree).includes('Checking the length limit'),
+    'a late success must not restore stale connected metadata',
+  )
+  mounted.unmount()
+})
+
+test('unmount aborts a pending Host description', async () => {
+  loadPluginState = await loadPlugin()
+  let requestSignal
+  const { mounted } = mountPanel({
+    describe: (signal) => {
+      requestSignal = signal
+      return new Promise(() => {})
+    },
+  })
+  await flushPanel()
+  assert.ok(requestSignal, 'the Host description RPC must receive an AbortSignal')
+  assert.equal(requestSignal.aborted, false)
+  mounted.unmount()
+  assert.equal(requestSignal.aborted, true, 'closing the panel must stop the metadata request')
 })
 
 test('editing the source cancels the request and ignores its late result', async () => {

@@ -100,3 +100,122 @@ test('Markdown segmentation returns no translatable prose for a code-only docume
   assert.equal(segments.map((segment) => segment.text).join(''), source)
   assert.equal(segments.some((segment) => segment.translate), false)
 })
+
+
+test('Markdown segmentation preserves reference-style link definitions and identifiers', () => {
+  const source = [
+    '[guide]: https://example.test/docs "Do not translate this title"',
+    '[reference]: <https://example.test/reference> \'Reference title\'',
+    '',
+    'Read the [installation guide][guide], the [reference][], and [guide] again.',
+    '![diagram][diagram]',
+    '[diagram]: https://example.test/diagram.png "Architecture diagram"',
+  ].join('\n')
+  const segments = markdownSegments(source)
+  assert.equal(segments.map((segment) => segment.text).join(''), source)
+
+  const prose = segments.filter((segment) => segment.translate).map((segment) => segment.text).join('')
+  const protectedSource = segments.filter((segment) => !segment.translate).map((segment) => segment.text).join('')
+
+  for (const label of ['installation guide', 'reference', 'guide again']) {
+    assert.ok(prose.includes(label), label + ' should remain translatable')
+  }
+  for (const token of [
+    '[guide]: https://example.test/docs "Do not translate this title"',
+    '[reference]: <https://example.test/reference> \'Reference title\'',
+    '][guide]',
+    '[]',
+    '![diagram][diagram]',
+    '[diagram]: https://example.test/diagram.png "Architecture diagram"',
+  ]) {
+    assert.ok(protectedSource.includes(token), token + ' must be preserved')
+    assert.equal(prose.includes(token), false, token + ' must not be sent for translation')
+  }
+});
+
+
+test('Markdown segmentation protects multiline and unclosed HTML comments', () => {
+  const source = [
+    'Translate this sentence.',
+    '<!-- translator note:',
+    'Do not translate this hidden annotation or {{runtime.value}}.',
+    '-->',
+    'Translate this sentence too.',
+  ].join('\n')
+  const segments = markdownSegments(source)
+  assert.equal(segments.map((segment) => segment.text).join(''), source)
+
+  const prose = segments.filter((segment) => segment.translate).map((segment) => segment.text).join('')
+  const protectedSource = segments.filter((segment) => !segment.translate).map((segment) => segment.text).join('')
+  assert.match(prose, /Translate this sentence/)
+  assert.match(prose, /Translate this sentence too/)
+  assert.ok(protectedSource.includes('<!-- translator note:'))
+  assert.ok(protectedSource.includes('Do not translate this hidden annotation'))
+  assert.ok(protectedSource.includes('{{runtime.value}}'))
+  assert.equal(prose.includes('hidden annotation'), false)
+
+  const alternateClose = [
+    'Translate before alternate comment.',
+    '<!-- alternate HTML comment terminator --!>',
+    'Translate after alternate comment.',
+  ].join('\n')
+  const alternateSegments = markdownSegments(alternateClose)
+  assert.equal(alternateSegments.map((segment) => segment.text).join(''), alternateClose)
+  const alternateProse = alternateSegments.filter((segment) => segment.translate).map((segment) => segment.text).join('')
+  assert.match(alternateProse, /Translate after alternate comment/)
+  assert.equal(alternateProse.includes('alternate HTML comment terminator'), false)
+
+  const unclosed = 'Translate this.\n<!-- unfinished comment\nprivate annotation'
+  const unclosedSegments = markdownSegments(unclosed)
+  assert.equal(unclosedSegments.map((segment) => segment.text).join(''), unclosed)
+  assert.deepEqual(
+    unclosedSegments.filter((segment) => segment.translate).map((segment) => segment.text),
+    ['Translate this.\n'],
+  )
+})
+
+
+test('Markdown segmentation preserves reference definition titles on following lines', () => {
+  for (const newline of ['\n', '\r\n']) {
+    const source = [
+      '[guide]: https://example.test/guide',
+      '  "Do not translate this continuation title"',
+      '',
+      'Read the [guide].',
+      'Translate this paragraph.',
+    ].join(newline)
+    const segments = markdownSegments(source)
+    assert.equal(segments.map((segment) => segment.text).join(''), source)
+    const prose = segments.filter((segment) => segment.translate).map((segment) => segment.text).join('')
+    const protectedSource = segments.filter((segment) => !segment.translate).map((segment) => segment.text).join('')
+    assert.match(prose, /Read the/)
+    assert.match(prose, /Translate this paragraph/)
+    assert.ok(protectedSource.includes('"Do not translate this continuation title"'))
+    assert.equal(prose.includes('continuation title'), false)
+   }
+})
+
+
+test('Markdown segmentation handles CR-only line endings', () => {
+  const newline = '\r'
+  const fence = String.fromCharCode(96).repeat(3)
+  const source = [
+    '[guide]: https://example.test/guide',
+    '  "Do not translate this title"',
+    '',
+    'Read the [guide].',
+    fence + 'js',
+    'const privateValue = "do not translate";',
+    fence,
+    'Translate this sentence.',
+  ].join(newline)
+  const segments = markdownSegments(source)
+  assert.equal(segments.map((segment) => segment.text).join(''), source)
+  const prose = segments.filter((segment) => segment.translate).map((segment) => segment.text).join('')
+  const protectedSource = segments.filter((segment) => !segment.translate).map((segment) => segment.text).join('')
+  assert.match(prose, /Read the/)
+  assert.match(prose, /Translate this sentence/)
+  assert.ok(protectedSource.includes('"Do not translate this title"'))
+  assert.ok(protectedSource.includes(fence + 'js' + newline + 'const privateValue = "do not translate";'))
+  assert.equal(prose.includes('privateValue'), false)
+})

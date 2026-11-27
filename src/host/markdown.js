@@ -26,38 +26,88 @@ export function markdownSegments(source) {
 
   // Fenced code blocks are protected whole, including opening and closing
   // delimiters. An unclosed fence protects to EOF rather than exposing code.
+  const lineBounds = (start) => {
+    let lineEnd = start
+    while (lineEnd < source.length && source[lineEnd] !== '\n' && source[lineEnd] !== '\r') {
+      lineEnd += 1
+    }
+    let nextLineStart = lineEnd
+    if (source.startsWith('\r\n', lineEnd)) nextLineStart += 2
+    else if (lineEnd < source.length) nextLineStart += 1
+    return { lineEnd, nextLineStart }
+  }
+
   let lineStart = 0
   while (lineStart < source.length) {
-    const newline = source.indexOf('\n', lineStart)
-    const lineEnd = newline < 0 ? source.length : newline
-    const rawLine = source.slice(lineStart, lineEnd)
-    const line = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine
+    const currentLine = lineBounds(lineStart)
+    const line = source.slice(lineStart, currentLine.lineEnd)
     const opening = line.match(/^ {0,3}(\x60{3,}|~{3,})/)
     if (opening === null) {
-      lineStart = newline < 0 ? source.length : newline + 1
+      lineStart = currentLine.nextLineStart
       continue
     }
 
     const fenceChar = opening[1][0]
     const fenceLength = opening[1].length
     const fenceUnit = fenceChar === '\x60' ? '\\x60' : '~'
-    const closing = new RegExp('^ {0,3}' + fenceUnit + '{' + fenceLength + ',}[ \t]*$')
-    let cursor = newline < 0 ? source.length : newline + 1
+    const closing = new RegExp('^ {0,3}' + fenceUnit + '{' + fenceLength + ',}[ \\t]*$')
+    let cursor = currentLine.nextLineStart
     let fenceEnd = source.length
     while (cursor < source.length) {
-      const nextNewline = source.indexOf('\n', cursor)
-      const nextEnd = nextNewline < 0 ? source.length : nextNewline
-      let candidate = source.slice(cursor, nextEnd)
-      if (candidate.endsWith('\r')) candidate = candidate.slice(0, -1)
+      const candidateLine = lineBounds(cursor)
+      const candidate = source.slice(cursor, candidateLine.lineEnd)
       if (closing.test(candidate)) {
-        fenceEnd = nextNewline < 0 ? nextEnd : nextNewline + 1
+        fenceEnd = candidateLine.nextLineStart
         break
       }
-      if (nextNewline < 0) break
-      cursor = nextNewline + 1
+      cursor = candidateLine.nextLineStart
     }
     add(lineStart, fenceEnd)
     lineStart = fenceEnd
+  }
+
+  // Reference-style link definitions are opaque: translating their label,
+  // destination or title would disconnect every use of that reference.
+  const referenceDefinitions = new Set()
+  const definitionPattern = /^ {0,3}\[([^\]\r\n]+)\]:[ \t]*(?:<[^>\r\n]*>|[^ \t\r\n]+)(?:[ \t]+(?:"[^"\r\n]*"|'[^'\r\n]*'|\([^\r\n)]*\))?)?[ \t]*$/gm
+  for (const match of source.matchAll(definitionPattern)) {
+    referenceDefinitions.add(match[1].trim().replace(/\s+/g, ' ').toLowerCase())
+    let definitionEnd = match.index + match[0].length
+    const definitionHasTitle = /[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\))[ \t]*$/.test(match[0])
+    if (!definitionHasTitle) {
+      let nextLineStart = definitionEnd
+      if (source.startsWith('\r\n', nextLineStart)) nextLineStart += 2
+      else if (source[nextLineStart] === '\n' || source[nextLineStart] === '\r') nextLineStart += 1
+      else nextLineStart = -1
+      if (nextLineStart >= 0) {
+        const titleLineBounds = lineBounds(nextLineStart)
+        const titleLine = source.slice(nextLineStart, titleLineBounds.lineEnd)
+        if (/^ {0,3}(?:"[^"\r\n]*"|'[^'\r\n]*'|\([^\r\n)]*\))[ \t]*$/.test(titleLine)) {
+          definitionEnd = titleLineBounds.nextLineStart
+        }
+      }
+    }
+    add(match.index, definitionEnd)
+  }
+
+  // Translate a reference link's visible label, but preserve its delimiters
+  // and reference identifier. Images remain opaque like inline images.
+  const referenceLinks = /(!?)\[([^\]\r\n]+)\](?:\[([^\]\r\n]*)\])?/g
+  for (const match of source.matchAll(referenceLinks)) {
+    const linkStart = match.index
+    const linkEnd = linkStart + match[0].length
+    if (source[linkEnd] === '(') continue // Inline links are handled below.
+    const identifier = match[3] === undefined || match[3] === '' ? match[2] : match[3]
+    const normalized = identifier.trim().replace(/\s+/g, ' ').toLowerCase()
+    if (!referenceDefinitions.has(normalized)) continue
+    if (match[1] === '!') {
+      add(linkStart, linkEnd)
+      continue
+    }
+    const labelStart = linkStart + 1
+    const labelEnd = labelStart + match[2].length
+    add(linkStart, labelStart)
+    add(labelEnd, linkEnd)
   }
 
   // Inline code, template tokens, HTML, autolinks, bare URLs and entities.
@@ -68,6 +118,27 @@ export function markdownSegments(source) {
   addMatches(/<https?:\/\/[^>\s]+>/gi)
   addMatches(/https?:\/\/[^\s<>()]+/gi)
   addMatches(/&(?:#\d+|#x[\da-f]+|[a-z][\w]+);/gi)
+  // HTML comments are non-rendered markup and may span multiple lines.
+  // Preserve an unclosed comment through EOF rather than exposing its payload.
+  let commentCursor = 0
+  while (commentCursor < source.length) {
+    const commentStart = source.indexOf('<!--', commentCursor)
+    if (commentStart < 0) break
+    const enclosing = ranges.find((range) => commentStart >= range.start && commentStart < range.end)
+    if (enclosing) {
+      commentCursor = enclosing.end
+      continue
+    }
+    // HTML defines both --> and --!> as comment-end tokens. Stop at
+    // the first valid terminator so a legacy closing form cannot hide the
+    // remainder of the document from translation.
+    const commentClose = /--!?>/.exec(source.slice(commentStart + 4))
+    const commentEnd = commentClose === null
+      ? source.length
+      : commentStart + 4 + commentClose.index + commentClose[0].length
+    add(commentStart, commentEnd)
+    commentCursor = commentEnd
+  }
 
   // Link labels can be translated; brackets, destinations and titles cannot.
   // Images are kept intact because their alt text describes an embedded asset.
