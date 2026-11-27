@@ -309,7 +309,6 @@ window.__ModuleLoader__.load({
 .dshTr-out { min-height: 220px; flex: 1 1 auto; padding: 12px 14px; overflow-y: auto; overflow-wrap: anywhere; font-size: 14px; line-height: 22px; white-space: pre-wrap; user-select: text; -webkit-user-select: text; }
 .dshTr-out:focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: -2px; }
 .dshTr-out[data-empty="true"] { color: var(--dsw-alias-label-secondary); }
-.dshTr-placeholder { color: var(--dsw-alias-label-secondary); }
 .dshTr-ghost { padding: 3px 8px; border: 1px solid transparent; border-radius: 6px; color: var(--dsw-alias-label-secondary); background: transparent; font: inherit; font-size: 11px; line-height: 16px; cursor: pointer; }
 .dshTr-ghost:hover:not(:disabled) { color: var(--dsw-alias-label-primary); background: var(--dsw-alias-bg-base); border-color: var(--dsw-alias-border-l2); }
 .dshTr-ghost:disabled { opacity: .45; cursor: default; }
