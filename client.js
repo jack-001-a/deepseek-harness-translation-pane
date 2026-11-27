@@ -699,6 +699,41 @@ function resolveLanguageSwapReason({ pending, sourceLanguage, targetLanguage, de
     }
 
     /**
+     * Build the option list of one language select.
+     * @param ids - the language ids the Host advertises, possibly empty.
+     * @param includeAuto - whether the "Auto detect" entry is offered.
+     * @returns the option list, keeping the built-in display names.
+     */
+    function languageOptions(ids, includeAuto) {
+      const known = new Map(LANGUAGE_CATALOG.map((entry) => [entry.id, entry]))
+      const advertised = uniqueCatalogIds(ids)
+      const source = advertised.length > 0 ? advertised : LANGUAGE_CATALOG.map((entry) => entry.id)
+      const options = []
+      for (const id of source) {
+        if (id === 'auto' && !includeAuto) continue
+        options.push(known.get(id) ?? { id, label: id, zh: id })
+      }
+      // The source select always offers auto-detection, even when the Host
+      // catalog does not list it.
+      if (includeAuto && !options.some((entry) => entry.id === 'auto')) {
+        options.unshift(known.get('auto'))
+      }
+      return options
+    }
+
+    /**
+     * Build the option list of the service select.
+     * @param ids - the provider ids the active route can serve, possibly empty.
+     * @returns the option list, keeping the built-in display names.
+     */
+    function providerOptions(ids) {
+      const advertised = uniqueCatalogIds(ids)
+      if (advertised.length === 0) return PROVIDER_CATALOG.slice(0, 1)
+      const known = new Map(PROVIDER_CATALOG.map((entry) => [entry.id, entry]))
+      return advertised.map((id) => known.get(id) ?? { id, label: id, zh: id })
+    }
+
+    /**
      * Call one Host method of this bundle.
      *
      * The shipped `dsh-client-connection` RPC takes the cancellation signal as
