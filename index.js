@@ -1445,16 +1445,16 @@ export class TranslationPaneService {
    */
   async readBody(response, limit, provider) {
     const body = response.body
-    if (body === undefined || body === null || typeof body.getReader !== 'function') {
-      const text = await response.text()
-      if (Buffer.byteLength(text, 'utf8') > limit) {
-        throw new TranslationPaneError(
-          CODE.invalidResponse,
-          `translationPane: the ${provider} response exceeds ${limit} bytes`,
-          { provider, limit },
-        )
-      }
-      return text
+    // Native Fetch responses expose a ReadableStream for non-empty bodies.
+    // Calling response.text() on an unknown body shape would buffer the entire
+    // payload before checking the configured cap, defeating the memory bound.
+    if (body === null || body === undefined) return ''
+    if (typeof body.getReader !== 'function') {
+      throw new TranslationPaneError(
+        CODE.invalidResponse,
+        `translationPane: the ${provider} response does not expose a readable stream`,
+        { provider, limit },
+      )
     }
     const reader = body.getReader()
     const chunks = []

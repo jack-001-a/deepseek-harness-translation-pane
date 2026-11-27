@@ -17,6 +17,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Report the provider that actually served a translation in the result metadata after failover, including cache hits.
 - Remove the legacy clipboard fallback element in a `finally` block even when the browser copy command throws.
 - Keep the glossary disclosure's summary markup within the HTML phrasing-content model and synchronize its expanded state with user interaction.
+- Reject non-streaming response adapters instead of materializing an unbounded response before enforcing the byte cap.
 
 ## [1.4.0] — 2026-11-27
 

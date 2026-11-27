@@ -669,6 +669,28 @@ test('errors: the provider failures are classified', async (t) => {
   )
 })
 
+
+test('response: unsupported body shapes are rejected without unbounded text buffering', async (t) => {
+  let textReads = 0
+  mockFetch(async () => ({
+    ok: true,
+    status: 200,
+    headers: new Headers(),
+    body: {},
+    text: async () => {
+      textReads += 1
+      return 'x'.repeat(1024 * 1024 + 1)
+    },
+  }), t)
+
+  const h = harness({ config: { failover: false, maxRetries: 0 } })
+  await assert.rejects(
+    h.service.translate({ text: 'hello', targetLanguage: 'zh-Hans' }),
+    (error) => error.code === 'translation-pane/invalid-response',
+  )
+  assert.equal(textReads, 0, 'the Host must reject an unbounded body adapter before materializing it')
+})
+
 test('errors: the shipped translator failures are mapped onto the pane codes', async (t) => {
   mockFetch(async () => jsonResponse(bingPayload('x')), t)
   const cases = [
