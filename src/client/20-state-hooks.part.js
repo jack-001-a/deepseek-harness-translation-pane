@@ -434,14 +434,67 @@
     }
 
     /**
-     * Derive provider messaging and the actual service label in one place.
-     * Mixed-fragment results take precedence over single-provider failover
-     * and health warnings, so the notice describes what really happened.
-     * @param options - the current request, Host health and localized labels.
-     * @returns the notice text and service label for result metadata.
+     * Own language/provider option derivation and direction-switch behavior.
+     * Host catalogs, localized labels, provider health and detected-language
+     * semantics stay outside the workbench rendering component.
+     * @param options - Host catalogs, current preferences and translation facts.
+     * @returns picker options, provider messaging and the swap action.
      */
-    /**
-     * Render a provider warning as an announced status message.
-     * @param props - the derived notice text.
-     * @returns the status message, or nothing when there is no notice.
-     */
+    function useLanguageControls(options) {
+      const { languages, providers, sourceLanguage, targetLanguage, provider, providerHealth,
+        failoverCapable, pending, error, result, source, output, setSource, setOutput,
+        setSourceLanguage, setTargetLanguage, renderLanguage, t } = options
+      const sourceOptions = React.useMemo(
+        () => withValue(languageOptions(languages, true, LANGUAGE_CATALOG), sourceLanguage),
+        [languages, sourceLanguage],
+      )
+      const targetOptions = React.useMemo(
+        () => withValue(languageOptions(languages, false, LANGUAGE_CATALOG), targetLanguage),
+        [languages, targetLanguage],
+      )
+      const serviceOptions = React.useMemo(
+        () => withValue(providerOptions(providers, PROVIDER_CATALOG), provider),
+        [provider, providers],
+      )
+      const providerLabel = React.useMemo(
+        () => renderLanguage(serviceOptions.find((option) => option.id === provider) ?? {
+          id: provider, label: provider, zh: provider,
+        }),
+        [provider, renderLanguage, serviceOptions],
+      )
+      const providerName = React.useCallback(
+        (id) => renderLanguage(
+          PROVIDER_CATALOG.find((entry) => entry.id === id) ?? { id, label: id, zh: id },
+        ),
+        [renderLanguage],
+      )
+      const detectedSource = result?.detectedSourceLanguage ?? null
+      const { notice, servedLabel } = resolveProviderPresentation({
+        pending, result, provider, providerHealth, failoverCapable, error, providerLabel, providerName, t,
+      })
+      const swapReason = React.useMemo(
+        () => resolveLanguageSwapReason({ pending, sourceLanguage, targetLanguage, detectedSource }),
+        [detectedSource, pending, sourceLanguage, targetLanguage],
+      )
+      const swap = React.useCallback(() => {
+        if (swapReason !== null) return
+        if (sourceLanguage === 'auto') {
+          if (detectedSource === null) return
+          setSourceLanguage(targetLanguage)
+          setTargetLanguage(detectedSource)
+        } else {
+          setSourceLanguage(targetLanguage)
+          setTargetLanguage(sourceLanguage)
+        }
+        if (output.length > 0) {
+          setSource(output)
+          setOutput(source)
+        }
+      }, [detectedSource, output, setOutput, setSource, setSourceLanguage, setTargetLanguage,
+        source, sourceLanguage, swapReason, targetLanguage])
+
+      return {
+        sourceOptions, targetOptions, serviceOptions, providerLabel, providerName,
+        detectedSource, notice, servedLabel, swapReason, swap,
+      }
+    }

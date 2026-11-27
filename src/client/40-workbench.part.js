@@ -110,93 +110,32 @@
         [],
       )
 
-      const sourceOptions = React.useMemo(
-        () => withValue(languageOptions(host.languages, true, LANGUAGE_CATALOG), sourceLanguage),
-        [host.languages, sourceLanguage],
-      )
-      const targetOptions = React.useMemo(
-        () => withValue(languageOptions(host.languages, false, LANGUAGE_CATALOG), targetLanguage),
-        [host.languages, targetLanguage],
-      )
-      const serviceOptions = React.useMemo(
-        () => withValue(providerOptions(host.providers, PROVIDER_CATALOG), provider),
-        [host.providers, provider],
-      )
-      // The service name as the select shows it, so the meta line and the
-      // select never disagree about which service is active.
-      const providerLabel = React.useMemo(
-        () =>
-          renderLanguage(
-            serviceOptions.find((option) => option.id === provider) ?? {
-              id: provider,
-              label: provider,
-              zh: provider,
-            },
-          ),
-        [provider, renderLanguage, serviceOptions],
-      )
-
-      /**
-       * Name one service id in the language the user is reading.
-       * @param id - the provider id.
-       * @returns the display name for the active locale.
-       */
-      const providerName = React.useCallback(
-        (id) =>
-          renderLanguage(
-            PROVIDER_CATALOG.find((entry) => entry.id === id) ?? { id, label: id, zh: id },
-          ),
-        [renderLanguage],
-      )
-
-      const detectedSource = result?.detectedSourceLanguage ?? null
-      const overLimit = host.limit !== null && source.length > host.limit
-      const canTranslate = source.trim().length > 0 && !pending && !overLimit
-
-      const { notice, servedLabel } = resolveProviderPresentation({
-        pending,
-        result,
+      const {
+        sourceOptions, targetOptions, serviceOptions, providerLabel, providerName,
+        detectedSource, notice, servedLabel, swapReason, swap,
+      } = useLanguageControls({
+        languages: host.languages,
+        providers: host.providers,
+        sourceLanguage,
+        targetLanguage,
         provider,
         providerHealth: host.providerHealth,
         failoverCapable: host.failoverCapable,
+        pending,
         error,
-        providerLabel,
-        providerName,
+        result,
+        source,
+        output,
+        setSource,
+        setOutput,
+        setSourceLanguage,
+        setTargetLanguage,
+        renderLanguage,
         t,
       })
 
-      /**
-       * Keep the enabled state and its localized explanation in sync.
-       */
-      const swapReason = React.useMemo(
-        () => resolveLanguageSwapReason({ pending, sourceLanguage, targetLanguage, detectedSource }),
-        [detectedSource, pending, sourceLanguage, targetLanguage],
-      )
-
-      /**
-       * Reverse the translation direction.
-       * @returns nothing.
-       */
-      const swap = React.useCallback(() => {
-        if (swapReason !== null) return
-        if (sourceLanguage === 'auto') {
-          // Reverse the direction: the old target becomes the source, and the
-          // detected source becomes the new target.
-          if (detectedSource === null) return
-          setSourceLanguage(targetLanguage)
-          setTargetLanguage(detectedSource)
-        } else {
-          setSourceLanguage(targetLanguage)
-          setTargetLanguage(sourceLanguage)
-        }
-        // Move the translation back into the source box so the reverse
-        // direction can be translated straight away; the previous source
-        // stays visible in the result box.
-        if (output.length > 0) {
-          setSource(output)
-          setOutput(source)
-        }
-      }, [detectedSource, output, source, sourceLanguage, swapReason, targetLanguage])
+      const overLimit = host.limit !== null && source.length > host.limit
+      const canTranslate = source.trim().length > 0 && !pending && !overLimit
 
       /**
        * Copy the translation to the clipboard.

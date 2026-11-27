@@ -14,6 +14,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 - Deduplicate Host-advertised language and provider options while preserving their order and custom ids.
 - Centralize language, provider and format defaults, Host provider reconciliation, and local persistence in a focused `useTranslationPreferences` hook.
 - Isolate provider-notice precedence and result-service labeling from the workbench, with an accessible presentational status component.
+- Consolidate language/provider option derivation, localized service labels, provider notices and detected-language direction swapping in a focused `useLanguageControls` hook.
 - Extract the controlled language, provider and format control group while preserving keyboard-accessible direction switching.
 - Separate the source editor and translation result cards from request state; keep submission, cancellation and copy actions in the workbench.
 - Extract the action footer, result metadata and glossary disclosure into focused presentation components with parent-owned Host and request state.

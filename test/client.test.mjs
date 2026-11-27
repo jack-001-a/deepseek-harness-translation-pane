@@ -1913,3 +1913,47 @@ test('format, provider and swap guidance render independently without hiding one
     mounted.unmount()
   })
 })
+
+
+test('auto-detected source swaps to the detected language and carries the translation back', async () => {
+  loadPluginState = await loadPlugin()
+  await withPreferences({ sourceLanguage: 'auto', targetLanguage: 'zh-Hans' }, async () => {
+    const { mounted } = mountPanel({
+      translate: () => ({
+        text: 'translated text',
+        provider: 'bing',
+        requestedProvider: 'bing',
+        failover: false,
+        detectedSourceLanguage: 'en',
+      }),
+    })
+    await flushPanel()
+    await typeSource(mounted, 'original source')
+    translateButton(mounted.tree).props.onClick()
+    await flushPanel()
+
+    const swap = findOne(
+      mounted.tree,
+      (node) => node.type === 'button' && node.props?.className === 'dshTr-swap',
+      'the enabled Auto-detect direction swap',
+    )
+    assert.equal(swap.props['aria-disabled'], undefined)
+    swap.props.onClick()
+    await flushPanel()
+
+    const sourceLanguage = findOne(
+      mounted.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith('-source'),
+      'the reversed source language selector',
+    )
+    const targetLanguage = findOne(
+      mounted.tree,
+      (node) => node.type === 'select' && String(node.props?.id).endsWith('-target'),
+      'the reversed target language selector',
+    )
+    assert.equal(sourceLanguage.props.value, 'zh-Hans')
+    assert.equal(targetLanguage.props.value, 'en')
+    assert.equal(sourceArea(mounted.tree).props.value, 'translated text')
+    mounted.unmount()
+  })
+})

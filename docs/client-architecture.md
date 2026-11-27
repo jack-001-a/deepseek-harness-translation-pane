@@ -45,3 +45,8 @@ check before an npm archive can be created.
 
 Both the source parts and builder are included in the package for traceability
 and reproducible maintenance; Harness still loads only `client.js`.
+
+
+### Language and provider controls
+
+`useLanguageControls` owns the Host-advertised language/provider option lists, localized service labels, provider health/failover notices, and direction-switch semantics. `TranslationPane` passes it the current Host and translation facts, then renders the returned view model. This keeps the rendering component from reimplementing catalog or swap rules and makes the detected-language reverse-translation path easier to exercise through focused UI tests.
