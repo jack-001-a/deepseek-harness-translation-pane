@@ -2342,8 +2342,8 @@ test('unload: disposed services reject work and release every retained user-deri
       (error) => error.message === 'translationPane: the service was unloaded',
     )
   }
-  await assert.rejects(
-    h.service.setGlossary(JSON.stringify([{ source: 'later', target: '稍后' }])),
+  assert.throws(
+    () => h.service.setGlossary(JSON.stringify([{ source: 'later', target: '稍后' }])),
     (error) => error.message === 'translationPane: the service was unloaded',
   )
 
