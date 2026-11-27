@@ -55,3 +55,8 @@ and reproducible maintenance; Harness still loads only `client.js`.
 ### Workbench actions
 
 `useTranslationWorkbenchActions` owns the source editor handlers, clear/copy behavior, clipboard feedback timer and keyboard shortcuts. It receives the current source, preferences and the request hook's `run`/`cancel` actions; it does not own transport or translation request state. This keeps keyboard and editor behavior consistent between the visible buttons and shortcuts while leaving `TranslationPane` responsible for composing views.
+
+
+### Host connection transitions
+
+`useHostConnection` tracks the last observed connection snapshot. Duplicate notifications do not issue duplicate `describe()` RPCs. A transition to `connecting` invalidates any in-flight metadata read and clears the stale offline alert while keeping the panel in its connecting state; a transition to `disconnected` remains explicitly offline, and only a subsequent `connected` transition starts a fresh Host description.

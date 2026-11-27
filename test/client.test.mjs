@@ -1986,3 +1986,50 @@ test('Meta+Enter submits through the same workbench translation action', async (
   assert.match(textOf(result), /meta translated/)
   mounted.unmount()
 })
+
+test('connection lifecycle clears offline during reconnect and ignores duplicate snapshots', async () => {
+  loadPluginState = await loadPlugin()
+  let descriptions = 0
+  const { mounted, setConnectionState } = mountPanel({
+    describe: () => {
+      descriptions += 1
+      return { ...HOST_DESCRIBE, maxTextChars: 4321 }
+    },
+  })
+  await flushPanel()
+  assert.equal(descriptions, 1)
+
+  setConnectionState('disconnected')
+  await flushPanel()
+  assert.match(textOf(mounted.tree), /Offline/)
+  assert.equal(descriptions, 1)
+
+  setConnectionState('disconnected')
+  await flushPanel()
+  assert.equal(descriptions, 1, 'a duplicate disconnected snapshot must not do extra work')
+
+  setConnectionState('connecting')
+  await flushPanel()
+  const connectingStatus = findOne(
+    mounted.tree,
+    (node) => node.props?.className === 'dshTr-status',
+    'the connecting status pill',
+  )
+  assert.equal(connectingStatus.props['data-state'], 'connecting')
+  assert.match(textOf(connectingStatus), /Connecting/)
+  assert.equal(
+    findAll(mounted.tree, (node) => node.props?.className === 'dshTr-error').length,
+    0,
+    'the stale offline alert must clear while the Host is actively reconnecting',
+  )
+
+  setConnectionState('connecting')
+  await flushPanel()
+  assert.equal(descriptions, 1, 'a duplicate connecting snapshot must not start a Host read')
+
+  setConnectionState('connected')
+  await flushPanel()
+  assert.equal(descriptions, 2, 'a real transition to connected must refresh Host facts')
+  assert.ok(textOf(mounted.tree).includes('/ 4321'))
+  mounted.unmount()
+})

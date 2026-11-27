@@ -94,6 +94,7 @@
       const describeSeq = React.useRef(0)
       const describeAbortRef = React.useRef(null)
       const mountedRef = React.useRef(true)
+      const connectionSnapshotRef = React.useRef(undefined)
 
       const describeHost = React.useCallback(async () => {
         if (!mountedRef.current) return false
@@ -175,17 +176,27 @@
       React.useEffect(() => {
         const state = optionalService(ctx, 'connection')?.state
         if (typeof state?.subscribe !== 'function') return undefined
+        // Metadata notifications can arrive without a connection transition.
+        // Only a real snapshot change should start or invalidate a Host read.
+        connectionSnapshotRef.current = state.getSnapshot?.()
         return state.subscribe(() => {
           const snapshot = state.getSnapshot?.()
+          if (Object.is(snapshot, connectionSnapshotRef.current)) return
+          connectionSnapshotRef.current = snapshot
+
           if (snapshot === 'connected') {
             void describeHost()
             return
           }
-          if (snapshot === 'disconnected') {
+          if (snapshot === 'disconnected' || snapshot === 'connecting') {
             describeSeq.current += 1
             describeAbortRef.current?.abort()
             describeAbortRef.current = null
-            setHost((previous) => ({ ...previous, connected: false, offline: true }))
+            setHost((previous) => ({
+              ...previous,
+              connected: false,
+              offline: snapshot === 'disconnected',
+            }))
           }
         })
       }, [describeHost])
