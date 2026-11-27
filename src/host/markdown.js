@@ -68,12 +68,18 @@ export function markdownSegments(source) {
     referenceDefinitions.add(match[1].trim().replace(/\s+/g, ' ').toLowerCase())
     let definitionEnd = match.index + match[0].length
     const definitionHasTitle = /[ \t]+(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\))[ \t]*$/.test(match[0])
-    if (!definitionHasTitle && source[definitionEnd] === '\n') {
-      const nextLineStart = definitionEnd + 1
-      const nextLineEnd = source.indexOf('\n', nextLineStart)
-      const titleLine = source.slice(nextLineStart, nextLineEnd < 0 ? source.length : nextLineEnd)
-      if (/^ {0,3}(?:"[^"\n]*"|'[^'\n]*'|\([^)\n]*\))[ \t]*$/.test(titleLine)) {
-        definitionEnd = nextLineEnd < 0 ? source.length : nextLineEnd + 1
+    if (!definitionHasTitle) {
+      let nextLineStart = definitionEnd
+      if (source.startsWith('\r\n', nextLineStart)) nextLineStart += 2
+      else if (source[nextLineStart] === '\n' || source[nextLineStart] === '\r') nextLineStart += 1
+      else nextLineStart = -1
+      if (nextLineStart >= 0) {
+        const nextLineEnd = source.indexOf('\n', nextLineStart)
+        const rawTitleLine = source.slice(nextLineStart, nextLineEnd < 0 ? source.length : nextLineEnd)
+        const titleLine = rawTitleLine.endsWith('\r') ? rawTitleLine.slice(0, -1) : rawTitleLine
+        if (/^ {0,3}(?:"[^"\n]*"|'[^'\n]*'|\([^)\\n]*\))[ \t]*$/.test(titleLine)) {
+          definitionEnd = nextLineEnd < 0 ? source.length : nextLineEnd + 1
+        }
       }
     }
     add(match.index, definitionEnd)
