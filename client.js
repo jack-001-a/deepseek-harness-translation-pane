@@ -1481,6 +1481,79 @@ function resolveProviderPresentation(options) {
       }
     }
 
+    /**
+     * Own the workbench's source/result actions and keyboard interaction.
+     * Request execution remains in `useTranslationRequest`; this hook binds
+     * the current editor/preferences to those request actions and owns the
+     * transient clipboard confirmation lifecycle.
+     * @param options - editor state, translation preferences and request actions.
+     * @returns stable handlers consumed by the workbench and its views.
+     */
+    function useTranslationWorkbenchActions(options) {
+      const {
+        source, setSource, output, setOutput, pending,
+        sourceLanguage, targetLanguage, provider, format,
+        run, cancel, resetTranslation, mountedRef, t,
+        setCopied, setError, setErrorTitle, setStatus,
+      } = options
+      const copiedTimerRef = React.useRef(null)
+
+      React.useEffect(() => () => {
+        if (copiedTimerRef.current !== null) {
+          clearTimeout(copiedTimerRef.current)
+          copiedTimerRef.current = null
+        }
+      }, [])
+
+      const submitTranslation = React.useCallback(() => {
+        void run({ source, sourceLanguage, targetLanguage, provider, format })
+      }, [format, provider, run, source, sourceLanguage, targetLanguage])
+
+      const copy = React.useCallback(async () => {
+        if (output.length === 0) return
+        const done = await copyText(output)
+        if (!mountedRef.current) return
+        if (!done) {
+          setError(t('error.copyFailed'))
+          setErrorTitle(null)
+          setStatus('failed')
+          return
+        }
+        setCopied(true)
+        if (copiedTimerRef.current !== null) clearTimeout(copiedTimerRef.current)
+        copiedTimerRef.current = setTimeout(() => {
+          copiedTimerRef.current = null
+          setCopied(false)
+        }, COPIED_FEEDBACK_MS)
+      }, [mountedRef, output, setCopied, setError, setErrorTitle, setStatus, t])
+
+      const clear = React.useCallback(() => {
+        setSource('')
+        resetTranslation()
+      }, [resetTranslation, setSource])
+
+      const handleSourceChange = React.useCallback((event) => {
+        if (pending) cancel()
+        setSource(event.target.value)
+        resetTranslation()
+      }, [cancel, pending, resetTranslation, setSource])
+
+      const handleSourceKeyDown = React.useCallback((event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+          event.preventDefault()
+          submitTranslation()
+          return
+        }
+        if (event.key === 'Escape' && pending) {
+          event.preventDefault()
+          event.stopPropagation()
+          cancel()
+        }
+      }, [cancel, pending, submitTranslation])
+
+      return { copy, clear, handleSourceChange, handleSourceKeyDown, submitTranslation }
+    }
+
     // Client source part: reusable workbench controls, cards, status and metadata views.
     function ProviderStatusNotice({ notice }) {
       return notice === null ? null : h('p', { className: 'dshTr-notice', role: 'status' }, notice)
@@ -2095,25 +2168,6 @@ function resolveProviderPresentation(options) {
         glossaryDraftDirtyRef,
       })
 
-      const copiedTimerRef = React.useRef(null)
-      // Surface terminology problems without making advanced configuration
-      // consume the default workbench space.
-      React.useEffect(() => {
-        if (host.glossaryWarnings.length > 0) setGlossaryOpen(true)
-      }, [host.glossaryWarnings.length])
-
-      React.useEffect(
-        () => () => {
-          // Abandon any in-flight request and clear the copy timer, so a
-          // closed panel never keeps a timer alive and never redraws.
-          if (copiedTimerRef.current !== null) {
-            clearTimeout(copiedTimerRef.current)
-            copiedTimerRef.current = null
-          }
-        },
-        [],
-      )
-
       const {
         sourceOptions, targetOptions, serviceOptions, providerLabel, providerName,
         detectedSource, notice, servedLabel, swapReason, swap,
@@ -2141,66 +2195,32 @@ function resolveProviderPresentation(options) {
       const overLimit = host.limit !== null && source.length > host.limit
       const canTranslate = source.trim().length > 0 && !pending && !overLimit
 
-      /**
-       * Copy the translation to the clipboard.
-       * @returns nothing; the outcome lands in the component state.
-       */
-      const copy = React.useCallback(async () => {
-        if (output.length === 0) return
-        const done = await copyText(output)
-        if (!mountedRef.current) return
-        if (!done) {
-          setError(t('error.copyFailed'))
-          setErrorTitle(null)
-          setStatus('failed')
-          return
-        }
-        setCopied(true)
-        if (copiedTimerRef.current !== null) clearTimeout(copiedTimerRef.current)
-        copiedTimerRef.current = setTimeout(() => {
-          copiedTimerRef.current = null
-          setCopied(false)
-        }, COPIED_FEEDBACK_MS)
-      }, [output, t])
-
-      /**
-       * Empty both text boxes and drop the previous result.
-       * @returns nothing.
-       */
-      const clear = React.useCallback(() => {
-        setSource('')
-        resetTranslation()
-      }, [resetTranslation])
-
-      /**
-       * Editing submitted text cancels any active request and invalidates its result.
-       */
-      const handleSourceChange = React.useCallback((event) => {
-        if (pending) cancel()
-        setSource(event.target.value)
-        resetTranslation()
-      }, [cancel, pending, resetTranslation, setSource])
-
-      /**
-       * Keep keyboard shortcuts at the workbench boundary, next to request state.
-       */
-      const handleSourceKeyDown = React.useCallback((event) => {
-        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-          event.preventDefault()
-          void run({ source, sourceLanguage, targetLanguage, provider, format })
-          return
-        }
-        if (event.key === 'Escape' && pending) {
-          // Escape cancels the running request instead of reaching the shell.
-          event.preventDefault()
-          event.stopPropagation()
-          cancel()
-        }
-      }, [cancel, format, pending, provider, run, source, sourceLanguage, targetLanguage])
-
-      const submitTranslation = React.useCallback(() => {
-        void run({ source, sourceLanguage, targetLanguage, provider, format })
-      }, [format, provider, run, source, sourceLanguage, targetLanguage])
+      const {
+        copy,
+        clear,
+        handleSourceChange,
+        handleSourceKeyDown,
+        submitTranslation,
+      } = useTranslationWorkbenchActions({
+        source,
+        setSource,
+        output,
+        setOutput,
+        pending,
+        sourceLanguage,
+        targetLanguage,
+        provider,
+        format,
+        run,
+        cancel,
+        resetTranslation,
+        mountedRef,
+        t,
+        setCopied,
+        setError,
+        setErrorTitle,
+        setStatus,
+      })
 
       const handleGlossaryToggle = React.useCallback((event) => {
         setGlossaryOpen(event.currentTarget.open)

@@ -498,3 +498,76 @@
         detectedSource, notice, servedLabel, swapReason, swap,
       }
     }
+
+    /**
+     * Own the workbench's source/result actions and keyboard interaction.
+     * Request execution remains in `useTranslationRequest`; this hook binds
+     * the current editor/preferences to those request actions and owns the
+     * transient clipboard confirmation lifecycle.
+     * @param options - editor state, translation preferences and request actions.
+     * @returns stable handlers consumed by the workbench and its views.
+     */
+    function useTranslationWorkbenchActions(options) {
+      const {
+        source, setSource, output, setOutput, pending,
+        sourceLanguage, targetLanguage, provider, format,
+        run, cancel, resetTranslation, mountedRef, t,
+        setCopied, setError, setErrorTitle, setStatus,
+      } = options
+      const copiedTimerRef = React.useRef(null)
+
+      React.useEffect(() => () => {
+        if (copiedTimerRef.current !== null) {
+          clearTimeout(copiedTimerRef.current)
+          copiedTimerRef.current = null
+        }
+      }, [])
+
+      const submitTranslation = React.useCallback(() => {
+        void run({ source, sourceLanguage, targetLanguage, provider, format })
+      }, [format, provider, run, source, sourceLanguage, targetLanguage])
+
+      const copy = React.useCallback(async () => {
+        if (output.length === 0) return
+        const done = await copyText(output)
+        if (!mountedRef.current) return
+        if (!done) {
+          setError(t('error.copyFailed'))
+          setErrorTitle(null)
+          setStatus('failed')
+          return
+        }
+        setCopied(true)
+        if (copiedTimerRef.current !== null) clearTimeout(copiedTimerRef.current)
+        copiedTimerRef.current = setTimeout(() => {
+          copiedTimerRef.current = null
+          setCopied(false)
+        }, COPIED_FEEDBACK_MS)
+      }, [mountedRef, output, setCopied, setError, setErrorTitle, setStatus, t])
+
+      const clear = React.useCallback(() => {
+        setSource('')
+        resetTranslation()
+      }, [resetTranslation, setSource])
+
+      const handleSourceChange = React.useCallback((event) => {
+        if (pending) cancel()
+        setSource(event.target.value)
+        resetTranslation()
+      }, [cancel, pending, resetTranslation, setSource])
+
+      const handleSourceKeyDown = React.useCallback((event) => {
+        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+          event.preventDefault()
+          submitTranslation()
+          return
+        }
+        if (event.key === 'Escape' && pending) {
+          event.preventDefault()
+          event.stopPropagation()
+          cancel()
+        }
+      }, [cancel, pending, submitTranslation])
+
+      return { copy, clear, handleSourceChange, handleSourceKeyDown, submitTranslation }
+    }

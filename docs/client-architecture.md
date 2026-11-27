@@ -50,3 +50,8 @@ and reproducible maintenance; Harness still loads only `client.js`.
 ### Language and provider controls
 
 `useLanguageControls` owns the Host-advertised language/provider option lists, localized service labels, provider health/failover notices, and direction-switch semantics. `TranslationPane` passes it the current Host and translation facts, then renders the returned view model. This keeps the rendering component from reimplementing catalog or swap rules and makes the detected-language reverse-translation path easier to exercise through focused UI tests.
+
+
+### Workbench actions
+
+`useTranslationWorkbenchActions` owns the source editor handlers, clear/copy behavior, clipboard feedback timer and keyboard shortcuts. It receives the current source, preferences and the request hook's `run`/`cancel` actions; it does not own transport or translation request state. This keeps keyboard and editor behavior consistent between the visible buttons and shortcuts while leaving `TranslationPane` responsible for composing views.

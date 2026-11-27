@@ -1957,3 +1957,32 @@ test('auto-detected source swaps to the detected language and carries the transl
     mounted.unmount()
   })
 })
+
+test('Meta+Enter submits through the same workbench translation action', async () => {
+  loadPluginState = await loadPlugin()
+  let submitted
+  const { mounted } = mountPanel({
+    translate: (args) => {
+      submitted = args
+      return { text: 'meta translated', provider: 'bing', requestedProvider: 'bing', failover: false }
+    },
+  })
+  await flushPanel()
+  await typeSource(mounted, 'meta shortcut request')
+
+  let prevented = false
+  sourceArea(mounted.tree).props.onKeyDown({
+    ctrlKey: false,
+    metaKey: true,
+    key: 'Enter',
+    preventDefault: () => { prevented = true },
+    stopPropagation: () => {},
+  })
+  await flushPanel()
+
+  assert.equal(prevented, true)
+  assert.equal(submitted.text, 'meta shortcut request')
+  const result = findOne(mounted.tree, (node) => node.props?.role === 'region', 'the translated result region')
+  assert.match(textOf(result), /meta translated/)
+  mounted.unmount()
+})
