@@ -91,6 +91,12 @@
         glossaryDraftDirtyRef,
       })
 
+      // Keep Host-reported glossary problems visible without requiring the
+      // user to discover the advanced section manually.
+      React.useEffect(() => {
+        if (host.glossaryWarnings.length > 0) setGlossaryOpen(true)
+      }, [host.glossaryWarnings.length])
+
       const {
         sourceOptions, targetOptions, serviceOptions, providerLabel, providerName,
         detectedSource, notice, servedLabel, swapReason, swap,
