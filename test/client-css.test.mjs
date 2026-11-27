@@ -5,14 +5,14 @@ import { test } from 'node:test'
 
 const clientPath = new URL('../client.js', import.meta.url)
 const clientSource = readFileSync(fileURLToPath(clientPath), 'utf8')
-const stylesheet = clientSource.match(/const CSS = `([\\s\\S]*?)`/)?.[1]
+const stylesheet = clientSource.match(/const CSS = `([\s\S]*?)`/)?.[1]
 
 test('quality: every translation-pane CSS class is used by the component', () => {
   assert.equal(typeof stylesheet, 'string', 'client.js must declare its scoped stylesheet')
 
-  const componentSource = clientSource.replace(/const CSS = `[\\s\\S]*?`/, '')
+  const componentSource = clientSource.replace(/const CSS = `[\s\S]*?`/, '')
   const classes = new Set(
-    [...stylesheet.matchAll(/\\.([A-Za-z_][\\w-]*)/g)]
+    [...stylesheet.matchAll(/\.([A-Za-z_][\w-]*)/g)]
       .map((match) => match[1])
       .filter((name) => name.startsWith('dshTr-')),
   )
