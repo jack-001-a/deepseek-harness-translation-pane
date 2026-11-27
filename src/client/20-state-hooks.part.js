@@ -160,6 +160,7 @@
     let hostDescribeSeq = 0
     let hostDescribeAbortRef = null
     let hostDescribePromise = null
+    let hostDescribeIsRefresh = false
 
     function publishSharedHost(next) {
       sharedHostSnapshot = typeof next === 'function' ? next(sharedHostSnapshot) : next
@@ -172,13 +173,21 @@
       hostDescribeAbortRef?.abort()
       hostDescribeAbortRef = null
       hostDescribePromise = null
+      hostDescribeIsRefresh = false
     }
 
-    function refreshSharedHost() {
+    function refreshSharedHost(force = false) {
       if (hostSubscribers.size === 0) return Promise.resolve(false)
-      if (hostDescribePromise !== null) return hostDescribePromise
+      if (hostDescribePromise !== null) {
+        // A successful translation requires a fresh metadata read even when
+        // the initial load is still pending. Concurrent post-translation
+        // refreshes, however, should converge on that one fresh request.
+        if (!force || hostDescribeIsRefresh) return hostDescribePromise
+        cancelSharedHostDescription()
+      }
 
       const seq = ++hostDescribeSeq
+      hostDescribeIsRefresh = force
       const controller = new AbortController()
       hostDescribeAbortRef = controller
       const isCurrent = () =>
@@ -240,7 +249,10 @@
           return false
         } finally {
           if (hostDescribeAbortRef === controller) hostDescribeAbortRef = null
-          if (hostDescribePromise === request) hostDescribePromise = null
+          if (hostDescribePromise === request) {
+            hostDescribePromise = null
+            hostDescribeIsRefresh = false
+          }
         }
       })()
       hostDescribePromise = request
@@ -300,7 +312,7 @@
     function useHostConnection({ setGlossaryDraft, glossaryDraftDirtyRef }) {
       const [host, setHost] = React.useState(sharedHostSnapshot)
       const mountedRef = React.useRef(true)
-      const describeHost = React.useCallback(() => refreshSharedHost(), [])
+      const describeHost = React.useCallback(() => refreshSharedHost(true), [])
 
       React.useEffect(() => {
         mountedRef.current = true

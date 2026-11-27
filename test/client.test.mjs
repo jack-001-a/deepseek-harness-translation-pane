@@ -1127,7 +1127,13 @@ test('shared Host reconnect performs one refresh and updates every mounted panel
     },
   )
   const table = dictionaries[NS].en
-  const t = (key) => table[key] ?? key
+  const t = (key, params) => {
+    const template = table[key] ?? key
+    if (!params) return template
+    return template.replace(/\{(\w+)\}/g, (match, name) =>
+      name in params ? String(params[name]) : match,
+    )
+  }
   const page = registrations.main.component
   const first = mount(page, { t })
   const second = mount(page, { t })

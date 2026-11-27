@@ -78,3 +78,6 @@ Preference changes are also synchronized between same-origin browser tabs throug
 ### Shared Host connection lifecycle
 
 Host metadata is stored once per plugin factory and broadcast to each mounted panel. The factory holds one connection-state subscription and deduplicates concurrent `describe()` calls. Disconnect/reconnect transitions update every panel from the same snapshot; a panel unmount does not cancel shared work while another panel remains mounted, and the last unmount removes the subscription and aborts the active description.
+
+
+Post-translation metadata reads supersede an older initial description, while simultaneous refreshes triggered by sibling panels share the same fresh request. This preserves the latest-result-wins guarantee without multiplying requests after a multi-panel translation completes.
