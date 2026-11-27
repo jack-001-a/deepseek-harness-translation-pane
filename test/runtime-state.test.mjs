@@ -30,6 +30,28 @@ test('TranslationCache replaces an existing entry without double-counting bytes'
   assert.equal(cache.get('key').text, 'second value')
 })
 
+test('TranslationCache isolates stored values and returned values from caller mutation', () => {
+  const cache = new TranslationCache(4, 2048)
+  const providersServed = ['bing', 'google']
+  const original = { text: 'translated result', providersServed }
+
+  cache.set('key', original)
+  original.text = 'mutated source object'
+  providersServed.push('untrusted-provider')
+
+  const firstRead = cache.get('key')
+  assert.equal(firstRead.text, 'translated result')
+  assert.deepEqual(firstRead.providersServed, ['bing', 'google'])
+
+  firstRead.text = 'mutated cache hit'
+  firstRead.providersServed.reverse()
+  firstRead.providersServed.push('another-provider')
+
+  const secondRead = cache.get('key')
+  assert.equal(secondRead.text, 'translated result')
+  assert.deepEqual(secondRead.providersServed, ['bing', 'google'])
+})
+
 test('TranslationCache.clear releases retained values and byte accounting', () => {
   const cache = new TranslationCache(4, 2048)
   cache.set('first', { text: 'private source result' })

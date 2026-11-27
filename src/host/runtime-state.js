@@ -4,6 +4,24 @@ const CACHE_ENTRY_OVERHEAD_BYTES = 256
 // ECMAScript Date TimeClip's largest representable millisecond timestamp.
 const MAX_DATE_TIMESTAMP = 8_640_000_000_000_000
 
+/**
+ * Copy the plain translation result stored in the cache.
+ *
+ * Cache results currently contain scalar fields and optional top-level arrays.
+ * Copy those arrays both on ingress and egress so neither the original caller
+ * nor a later cache-hit caller can mutate data retained for other requests.
+ * @param value - the cached translation result.
+ * @returns an isolated result object.
+ */
+function copyCacheValue(value) {
+  if (value === null || typeof value !== 'object') return value
+  const copy = { ...value }
+  for (const [key, field] of Object.entries(copy)) {
+    if (Array.isArray(field)) copy[key] = [...field]
+  }
+  return copy
+}
+
 export class TranslationCache {
   /**
    * @param limit - how many entries are retained.
@@ -26,7 +44,7 @@ export class TranslationCache {
     if (entry === undefined) return undefined
     this.entries.delete(key)
     this.entries.set(key, entry)
-    return entry.value
+    return copyCacheValue(entry.value)
   }
 
   /**
@@ -49,7 +67,7 @@ export class TranslationCache {
     }
     if (entryBytes > this.maxBytes) return
 
-    this.entries.set(key, { value, bytes: entryBytes })
+    this.entries.set(key, { value: copyCacheValue(value), bytes: entryBytes })
     this.bytes += entryBytes
     while (this.entries.size > this.limit || this.bytes > this.maxBytes) {
       const oldest = this.entries.entries().next()
