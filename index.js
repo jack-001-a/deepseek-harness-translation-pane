@@ -232,12 +232,7 @@ export function providerLanguage(tag, provider) {
   return tag
 }
 
-/**
- * Find syntax tokens that should not be divided between provider requests.
- * Tokens larger than the request limit are deliberately left splittable.
- * @param text - complete source text.
- * @returns sorted, non-overlapping source ranges.
- */
+/** HTTP-date month abbreviations indexed by their UTC month number. */
 const HTTP_DATE_MONTHS = Object.freeze({
   Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5,
   Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11,
@@ -361,10 +356,10 @@ function parseRetryAfter(value) {
   return Math.min(Math.max(0, when - Date.now()), MAX_TIMER_DELAY_MS)
 }
 /**
- * A bounded least-recently-used map of translated documents.
+ * A FIFO semaphore that bounds active provider attempts and pending work.
  *
- * The panel re-translates the same paragraph often and the anonymous
- * endpoints rate-limit, so a small cache removes most of the traffic.
+ * Waiters are cancellable, and releasing a slot grants it to the oldest live
+ * waiter. The queue cap prevents unbounded memory growth under load.
  */
 class FairSemaphore {
   /**
