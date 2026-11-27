@@ -16,6 +16,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Fixed
 
+- Ignore delayed glossary import, glossary apply/export, and clipboard completions after the workbench unmounts.
 - Clear the previous translation as soon as a new request starts, and show an explicit in-flight state so stale output cannot be mistaken for the current request.
 - Keep provider-health state limited to the status the panel actually renders; unused provider diagnostics no longer travel into client component state.
 

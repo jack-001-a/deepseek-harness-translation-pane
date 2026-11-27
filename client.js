@@ -1024,11 +1024,12 @@ window.__ModuleLoader__.load({
        * @returns nothing.
        */
       const applyGlossary = React.useCallback(async () => {
-        if (!host.connected || glossaryBusy) return
+        if (!mountedRef.current || !host.connected || glossaryBusy) return
         setGlossaryBusy(true)
         setGlossaryMessage(null)
         try {
           const value = await callHost(ctx, 'setGlossary', { payload: glossaryDraft })
+          if (!mountedRef.current) return
           const nextGlossary = Array.isArray(value?.glossary) ? value.glossary : []
           const warnings = Array.isArray(value?.warnings) ? value.warnings : []
           glossaryDraftDirtyRef.current = false
@@ -1052,9 +1053,11 @@ window.__ModuleLoader__.load({
               : t('glossary.applied', { count: nextGlossary.length }),
           )
         } catch (failure) {
-          setGlossaryMessage(diagnosticFor(failure) || t('error.generic'))
+          if (mountedRef.current) {
+            setGlossaryMessage(diagnosticFor(failure) || t('error.generic'))
+          }
         } finally {
-          setGlossaryBusy(false)
+          if (mountedRef.current) setGlossaryBusy(false)
         }
       }, [glossaryBusy, glossaryDraft, host.connected, t])
 
@@ -1063,7 +1066,9 @@ window.__ModuleLoader__.load({
        * @returns nothing.
        */
       const exportGlossary = React.useCallback(async () => {
+        if (!mountedRef.current) return
         const copied = await copyText(glossaryJson(host.glossary))
+        if (!mountedRef.current) return
         setGlossaryMessage(copied ? t('glossary.exported') : t('error.copyFailed'))
       }, [host.glossary, t])
 
@@ -1073,6 +1078,7 @@ window.__ModuleLoader__.load({
        * @returns resolution after the file has been read.
        */
       const importGlossaryFile = React.useCallback(async (event) => {
+        if (!mountedRef.current) return
         const file = event.target.files?.[0]
         if (!file) {
           event.target.value = ''
@@ -1084,11 +1090,13 @@ window.__ModuleLoader__.load({
           return
         }
         try {
-          setGlossaryDraft(await file.text())
+          const contents = await file.text()
+          if (!mountedRef.current) return
+          setGlossaryDraft(contents)
           glossaryDraftDirtyRef.current = true
           setGlossaryMessage(null)
         } catch {
-          setGlossaryMessage(t('glossary.invalidFile'))
+          if (mountedRef.current) setGlossaryMessage(t('glossary.invalidFile'))
         }
       }, [t])
 
@@ -1331,6 +1339,7 @@ window.__ModuleLoader__.load({
       const copy = React.useCallback(async () => {
         if (output.length === 0) return
         const done = await copyText(output)
+        if (!mountedRef.current) return
         if (!done) {
           setError(t('error.copyFailed'))
           setErrorTitle(null)

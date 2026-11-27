@@ -272,7 +272,7 @@ function applyPlugin(plugin, locale, options = {}) {
  * @returns the mount handle.
  */
 function mount(Component, props) {
-  const owner = { index: 0, values: [], tree: undefined, scheduled: false, effects: [], cleanups: [] }
+  const owner = { index: 0, values: [], tree: undefined, scheduled: false, unmounted: false, scheduleCalls: 0, effects: [], cleanups: [] }
 
   /**
    * Replace every component element with the tree it renders.
@@ -309,7 +309,8 @@ function mount(Component, props) {
     for (const effect of effects) effect()
   }
   owner.schedule = () => {
-    if (owner.scheduled) return
+    owner.scheduleCalls += 1
+    if (owner.unmounted || owner.scheduled) return
     owner.scheduled = true
     queueMicrotask(() => {
       owner.scheduled = false
@@ -318,6 +319,7 @@ function mount(Component, props) {
   }
   draw()
   owner.unmount = () => {
+    owner.unmounted = true
     for (let index = owner.cleanups.length - 1; index >= 0; index -= 1) {
       owner.cleanups[index]?.()
       owner.cleanups[index] = undefined
@@ -1183,4 +1185,55 @@ test('Host glossary warnings open the advanced glossary section automatically', 
   assert.equal(details.props.open, true)
   assert.match(textOf(mounted.tree), /Overlapping terms detected/)
   mounted.unmount()
+})
+
+test('an imported glossary file finishing after unmount does not update panel state', async () => {
+  loadPluginState = await loadPlugin()
+  const { mounted } = mountPanel()
+  await flushPanel()
+  let finishRead
+  const read = new Promise((resolve) => {
+    finishRead = resolve
+  })
+  const fileInput = findOne(
+    mounted.tree,
+    (node) => node.type === 'input' && node.props?.type === 'file',
+    'the glossary JSON file input',
+  )
+  fileInput.props.onChange({
+    target: {
+      files: [{ size: 20, text: () => read }],
+      value: 'glossary.json',
+    },
+  })
+  const schedulesAtUnmount = mounted.scheduleCalls
+  mounted.unmount()
+
+  finishRead(JSON.stringify({ version: 1, glossary: [{ source: 'API', target: '接口' }] }))
+  await flushPanel()
+  assert.equal(mounted.scheduleCalls, schedulesAtUnmount)
+})
+
+test('a glossary apply finishing after unmount does not update panel state', async () => {
+  loadPluginState = await loadPlugin()
+  let finishApply
+  const { mounted } = mountPanel({
+    setGlossary: () => new Promise((resolve) => {
+      finishApply = resolve
+    }),
+  })
+  await flushPanel()
+  const apply = findOne(
+    mounted.tree,
+    (node) => node.type === 'button' && textOf(node) === 'Apply glossary',
+    'the Apply glossary action',
+  )
+  apply.props.onClick()
+  await flushPanel()
+  const schedulesAtUnmount = mounted.scheduleCalls
+  mounted.unmount()
+
+  finishApply({ glossary: [], warnings: [], count: 0, revision: 1 })
+  await flushPanel()
+  assert.equal(mounted.scheduleCalls, schedulesAtUnmount)
 })
