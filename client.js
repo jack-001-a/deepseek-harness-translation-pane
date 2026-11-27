@@ -1725,6 +1725,80 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Resolve the compact status, full alert copy and visual state from the
+     * current Host and request snapshot. Keep precedence in one pure function
+     * so the header and alert cannot drift apart as new states are added.
+     * @param options - Host/request facts and the active translator.
+     * @returns the current status pill and alert presentation.
+     */
+    function resolveWorkbenchStatus(options) {
+      const { error, offline, pending, overLimit, status, connected, t } = options
+      const alertMessage = error !== null ? error : offline ? t('error.offline') : null
+      const state = offline
+        ? 'offline'
+        : error !== null
+          ? 'error'
+          : pending
+            ? 'working'
+            : overLimit
+              ? 'limited'
+              : status === 'cancelled'
+                ? 'cancelled'
+                : !connected
+                  ? 'connecting'
+                  : 'ready'
+      const stateLabel = offline
+        ? t('status.offline')
+        : error !== null
+          ? t('status.error')
+          : pending
+            ? t('status.translating')
+            : overLimit
+              ? t('status.limited')
+              : status === 'cancelled'
+                ? t('status.cancelled')
+                : !connected
+                  ? t('status.connecting')
+                  : t('status.ready')
+      return { alertMessage, state, stateLabel }
+    }
+
+    /**
+     * Render the workbench heading and its compact, accessible status pill.
+     * @param props - resolved state and the active translator.
+     * @returns the page header.
+     */
+    function TranslationHeader({ state, stateLabel, t }) {
+      return h(
+        'div',
+        { className: 'dshTr-head' },
+        h(
+          'div',
+          null,
+          h('h2', { className: 'dshTr-title' }, t('page.title')),
+          h('p', { className: 'dshTr-subtitle' }, t('page.subtitle')),
+        ),
+        h(
+          'span',
+          { className: 'dshTr-status', 'data-state': state },
+          h('span', { className: 'dshTr-statusDot', 'aria-hidden': true }),
+          stateLabel,
+        ),
+      )
+    }
+
+    /**
+     * Render the full-sentence error/offline feedback separately from the pill.
+     * @param props - user-facing message and optional diagnostic title.
+     * @returns an alert region, or nothing when no alert is active.
+     */
+    function TranslationAlert({ message, title }) {
+      return message === null
+        ? null
+        : h('div', { className: 'dshTr-error', role: 'alert', title: title ?? undefined }, message)
+    }
+
+    /**
      * The translation workbench.
      * @param props - the slot props, carrying the bound translator.
      * @returns the workbench element.
@@ -2005,35 +2079,16 @@ window.__ModuleLoader__.load({
         setGlossaryMessage(null)
       }, [setGlossaryDraft, setGlossaryMessage])
 
-      // The status pill carries a short state label; the alert region carries
-      // the full sentence, so the pill is never the only signal.
-      const alertMessage = error !== null ? error : host.offline ? t('error.offline') : null
-      const state = host.offline
-        ? 'offline'
-        : error !== null
-          ? 'error'
-          : pending
-            ? 'working'
-            : overLimit
-              ? 'limited'
-              : status === 'cancelled'
-                ? 'cancelled'
-                : !host.connected
-                  ? 'connecting'
-                  : 'ready'
-      const stateLabel = host.offline
-        ? t('status.offline')
-        : error !== null
-          ? t('status.error')
-          : pending
-            ? t('status.translating')
-            : overLimit
-              ? t('status.limited')
-              : status === 'cancelled'
-                ? t('status.cancelled')
-                : !host.connected
-                  ? t('status.connecting')
-                  : t('status.ready')
+      const { alertMessage, state, stateLabel } = resolveWorkbenchStatus({
+        error,
+        offline: host.offline,
+        pending,
+        overLimit,
+        status,
+        connected: host.connected,
+        t,
+      })
+
       const routeLabel = (() => {
         if (host.route === null) return null
         if (host.route === 'translator') return t('route.translator')
@@ -2045,22 +2100,7 @@ window.__ModuleLoader__.load({
         'div',
         { className: 'dshTr' },
         h(Styles, null),
-        h(
-          'div',
-          { className: 'dshTr-head' },
-          h(
-            'div',
-            null,
-            h('h2', { className: 'dshTr-title' }, t('page.title')),
-            h('p', { className: 'dshTr-subtitle' }, t('page.subtitle')),
-          ),
-          h(
-            'span',
-            { className: 'dshTr-status', 'data-state': state },
-            h('span', { className: 'dshTr-statusDot', 'aria-hidden': true }),
-            stateLabel,
-          ),
-        ),
+        h(TranslationHeader, { state, stateLabel, t }),
         h(TranslationControls, {
           ids,
           sourceLanguage,
@@ -2110,17 +2150,7 @@ window.__ModuleLoader__.load({
             t,
           }),
         ),
-        alertMessage !== null
-          ? h(
-              'div',
-              {
-                className: 'dshTr-error',
-                role: 'alert',
-                title: errorTitle ?? undefined,
-              },
-              alertMessage,
-            )
-          : null,
+        h(TranslationAlert, { message: alertMessage, title: errorTitle }),
         h(TranslationFooter, {
           ids,
           canTranslate,

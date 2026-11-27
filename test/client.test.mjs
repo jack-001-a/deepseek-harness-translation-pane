@@ -1635,3 +1635,48 @@ test('the extracted glossary view forwards draft edits and Host action state', a
   assert.equal(exportAction.props.disabled, true, 'an empty active glossary cannot be exported')
   mounted.unmount()
 })
+
+test('the extracted header and alert keep offline state visible and recover on reconnect', async () => {
+  loadPluginState = await loadPlugin()
+  const { mounted, setConnectionState } = mountPanel()
+  await flushPanel()
+
+  setConnectionState('disconnected')
+  await flushPanel()
+  const header = findOne(
+    mounted.tree,
+    (node) => node.props?.className === 'dshTr-head',
+    'the translation header',
+  )
+  const offlineStatus = findOne(
+    header,
+    (node) => node.props?.className === 'dshTr-status',
+    'the offline status pill',
+  )
+  assert.equal(offlineStatus.props['data-state'], 'offline')
+  assert.equal(textOf(offlineStatus), 'Offline')
+
+  const alert = findOne(
+    mounted.tree,
+    (node) => node.props?.className === 'dshTr-error' && node.props?.role === 'alert',
+    'the offline alert',
+  )
+  assert.match(textOf(alert), /cannot reach its Host/)
+  assert.equal(alert.props.title, undefined)
+
+  setConnectionState('connected')
+  await flushPanel()
+  const readyStatus = findOne(
+    mounted.tree,
+    (node) => node.props?.className === 'dshTr-status',
+    'the recovered status pill',
+  )
+  assert.equal(readyStatus.props['data-state'], 'ready')
+  assert.equal(textOf(readyStatus), 'Ready')
+  assert.equal(
+    findAll(mounted.tree, (node) => node.props?.className === 'dshTr-error').length,
+    0,
+    'the offline alert must disappear after the Host reconnects',
+  )
+  mounted.unmount()
+})
