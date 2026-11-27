@@ -97,6 +97,22 @@ export function markdownSegments(source) {
   addMatches(/<https?:\/\/[^>\s]+>/gi)
   addMatches(/https?:\/\/[^\s<>()]+/gi)
   addMatches(/&(?:#\d+|#x[\da-f]+|[a-z][\w]+);/gi)
+  // HTML comments are non-rendered markup and may span multiple lines.
+  // Preserve an unclosed comment through EOF rather than exposing its payload.
+  let commentCursor = 0
+  while (commentCursor < source.length) {
+    const commentStart = source.indexOf('<!--', commentCursor)
+    if (commentStart < 0) break
+    const enclosing = ranges.find((range) => commentStart >= range.start && commentStart < range.end)
+    if (enclosing) {
+      commentCursor = enclosing.end
+      continue
+    }
+    const commentClose = source.indexOf('-->', commentStart + 4)
+    const commentEnd = commentClose < 0 ? source.length : commentClose + 3
+    add(commentStart, commentEnd)
+    commentCursor = commentEnd
+  }
 
   // Link labels can be translated; brackets, destinations and titles cannot.
   // Images are kept intact because their alt text describes an embedded asset.
