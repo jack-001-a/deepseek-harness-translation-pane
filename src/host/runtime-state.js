@@ -1,6 +1,8 @@
 import { Buffer } from 'node:buffer'
 
 const CACHE_ENTRY_OVERHEAD_BYTES = 256
+// ECMAScript Date TimeClip's largest representable millisecond timestamp.
+const MAX_DATE_TIMESTAMP = 8_640_000_000_000_000
 
 export class TranslationCache {
   /**
@@ -96,9 +98,13 @@ export class ProviderHealth {
    */
   recordFailure(provider, reason, now = Date.now()) {
     if (this.cooldownMs <= 0) return
+    // Date#toISOString() rejects timestamps outside the ECMAScript
+    // TimeClip range. A large but valid integer config must not make
+    // describe() throw after the provider records a failure.
+    const until = Math.min(now + this.cooldownMs, MAX_DATE_TIMESTAMP)
     this.failures.set(provider, {
       reason: typeof reason === 'string' ? reason : '',
-      until: now + this.cooldownMs,
+      until,
     })
   }
 
@@ -178,8 +184,11 @@ export class TokenBucket {
    */
   take(now = Date.now()) {
     if (this.perMinute <= 0) return false
-    const elapsed = Math.max(0, now - this.updatedAt)
-    this.updatedAt = now
+    // Date.now() may move backwards after a system-clock adjustment.
+    // Keep a high-water mark so rolling the clock back cannot mint tokens.
+    const timestamp = Number.isFinite(now) ? Math.max(this.updatedAt, now) : this.updatedAt
+    const elapsed = timestamp - this.updatedAt
+    this.updatedAt = timestamp
     this.tokens = Math.min(this.capacity, this.tokens + (elapsed * this.perMinute) / 60000)
     if (this.tokens < 1) return false
     this.tokens -= 1

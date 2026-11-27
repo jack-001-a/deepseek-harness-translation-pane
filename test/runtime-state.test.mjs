@@ -64,6 +64,21 @@ test('ProviderHealth tracks cooldown, recovery, provider set and reset', () => {
   })
 })
 
+test('ProviderHealth clamps extreme cooldowns to a serializable date boundary', () => {
+  const health = new ProviderHealth(Number.MAX_VALUE, ['bing'])
+  health.recordFailure('bing', 'provider-unreachable', 0)
+
+  assert.deepEqual(health.snapshot(0), {
+    bing: {
+      unreachable: true,
+      until: new Date(8_640_000_000_000_000).toISOString(),
+      reason: 'provider-unreachable',
+    },
+  })
+  assert.equal(health.isAvailable('bing', 8_639_999_999_999_999), false)
+  assert.equal(health.isAvailable('bing', 8_640_000_000_000_000), true)
+})
+
 test('ProviderHealth with zero cooldown does not retain failures', () => {
   const health = new ProviderHealth(0, ['bing'])
   health.recordFailure('bing', 'temporary', 100)
@@ -81,6 +96,16 @@ test('TokenBucket enforces capacity and continuous refill', () => {
   assert.equal(bucket.take(120000), true)
   assert.equal(bucket.take(120000), true)
   assert.equal(bucket.take(120000), false)
+})
+
+test('TokenBucket does not mint tokens when the system clock moves backwards', () => {
+  const bucket = new TokenBucket(1, 100000)
+  assert.equal(bucket.take(100000), true)
+  assert.equal(bucket.take(100000), false)
+  assert.equal(bucket.take(50000), false)
+  assert.equal(bucket.take(100000), false)
+  assert.equal(bucket.take(159999), false)
+  assert.equal(bucket.take(160000), true)
 })
 
 test('TokenBucket with zero rate refuses every request', () => {
