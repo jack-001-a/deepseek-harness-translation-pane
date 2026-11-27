@@ -1135,6 +1135,33 @@ test('a health warning is not shown when the Host cannot fail over', async () =>
   })
 })
 
+test('a successful RPC with a malformed translation payload is shown as an error', async () => {
+  loadPluginState = await loadPlugin()
+  const { mounted } = mountPanel({
+    translate: () => ({ text: 42, provider: 'bing', cached: false, durationMs: 1 }),
+  })
+  await flushPanel()
+  await typeSource(mounted, 'hello')
+  translateButton(mounted.tree).props.onClick()
+  await flushPanel()
+
+  const alert = findOne(mounted.tree, (node) => node.props?.role === 'alert', 'the invalid-response alert')
+  assert.equal(
+    textOf(alert),
+    'The translation service answered with something the Harness could not read. Try again.',
+  )
+  const status = findOne(
+    mounted.tree,
+    (node) => node.props?.className === 'dshTr-status',
+    'the failed request status',
+  )
+  assert.equal(textOf(status), 'Failed')
+  assert.equal(textOf(translateButton(mounted.tree)), 'Retry')
+  const region = findOne(mounted.tree, (node) => node.props?.role === 'region', 'the result region')
+  assert.equal(region.props['data-empty'], 'true')
+  mounted.unmount()
+})
+
 test('the provider-unreachable failure is distinct from the carrier failure', async () => {
   loadPluginState = await loadPlugin()
   const failing = (code) => ({

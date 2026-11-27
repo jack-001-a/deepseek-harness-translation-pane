@@ -1127,7 +1127,13 @@ window.__ModuleLoader__.load({
             controller.signal,
           )
           if (!mountedRef.current || seq !== requestSeq.current) return
-          setOutput(typeof value?.text === 'string' ? value.text : '')
+          if (typeof value?.text !== 'string') {
+            throw new HostError(
+              'translation-pane/invalid-response',
+              'translationPane: the Host returned a response without text',
+            )
+          }
+          setOutput(value.text)
           setResult({
             cached: value?.cached === true,
             durationMs: typeof value?.durationMs === 'number' ? value.durationMs : null,
