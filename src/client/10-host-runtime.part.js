@@ -137,6 +137,25 @@
     }
 
     /**
+     * Read the Host's observed provider health, tolerating an older Host.
+     *
+     * The Host sends plain serializable data keyed by provider id, for
+     * example `{ google: { unreachable: true, until: '…' } }`. An older Host
+     * omits the key entirely, and the panel simply has no health notice.
+     * @param value - the Host's `providerHealth` field, possibly absent.
+     * @returns the health facts the panel can render, keyed by provider id.
+     */
+    function readProviderHealth(value) {
+      if (value === null || typeof value !== 'object' || Array.isArray(value)) return {}
+      const health = {}
+      for (const [provider, entry] of Object.entries(value)) {
+        if (entry === null || typeof entry !== 'object' || typeof entry.unreachable !== 'boolean') continue
+        health[provider] = { unreachable: entry.unreachable }
+      }
+      return health
+    }
+
+    /**
      * Call one Host method of this bundle.
      *
      * The shipped `dsh-client-connection` RPC takes the cancellation signal as
