@@ -1519,6 +1519,212 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Render the translation action row and character-limit feedback.
+     * @param props - request state, character counts, ids and action callbacks.
+     * @returns the accessible workbench footer.
+     */
+    function TranslationFooter(props) {
+      const {
+        ids,
+        canTranslate,
+        pending,
+        error,
+        sourceLength,
+        limit,
+        overLimit,
+        onTranslate,
+        onCancel,
+        t,
+      } = props
+      return h(
+        'div',
+        { className: 'dshTr-foot' },
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dshTr-button',
+            disabled: !canTranslate,
+            'aria-keyshortcuts': 'Control+Enter Meta+Enter',
+            // The hint and live counter explain the action and its limit.
+            'aria-describedby': `${ids.hint} ${ids.counter}`,
+            onClick: onTranslate,
+          },
+          pending ? t('action.translating') : error !== null ? t('action.retry') : t('action.translate'),
+        ),
+        pending
+          ? h(
+              'button',
+              {
+                type: 'button',
+                className: 'dshTr-button dshTr-buttonGhost',
+                'aria-keyshortcuts': 'Escape',
+                onClick: onCancel,
+              },
+              t('action.cancel'),
+            )
+          : null,
+        h('span', { className: 'dshTr-hint', id: ids.hint }, t('hint.keyboard')),
+        h(
+          'span',
+          {
+            className: 'dshTr-counter',
+            id: ids.counter,
+            'data-over': overLimit ? 'true' : 'false',
+          },
+          limit === null
+            ? t('meta.limitPending')
+            : overLimit
+              ? t('meta.over', { count: sourceLength - limit })
+              : t('meta.count', { count: sourceLength, limit }),
+        ),
+      )
+    }
+
+    /**
+     * Render service, route and result metadata for the completed request.
+     * @param props - resolved labels and translation result details.
+     * @returns the result metadata row.
+     */
+    function TranslationMetadata(props) {
+      const { routeLabel, servedLabel, result, detectedSource, renderLanguage, t } = props
+      const detectedLanguage = detectedSource === null
+        ? null
+        : renderLanguage(
+            LANGUAGE_CATALOG.find((entry) => entry.id === detectedSource) ?? {
+              id: detectedSource,
+              label: detectedSource,
+              zh: detectedSource,
+            },
+          )
+      return h(
+        'div',
+        { className: 'dshTr-meta' },
+        routeLabel !== null ? h('span', null, t('meta.route', { route: routeLabel })) : null,
+        h('span', null, t('meta.provider', { provider: servedLabel })),
+        result?.durationMs !== null && result?.durationMs !== undefined
+          ? h('span', null, t('meta.duration', { ms: result.durationMs }))
+          : null,
+        result !== null
+          ? h('span', null, result.cached ? t('meta.cached') : t('meta.fresh'))
+          : null,
+        detectedLanguage !== null
+          ? h('span', null, t('meta.detectedSource', { language: detectedLanguage }))
+          : null,
+      )
+    }
+
+    /**
+     * Render terminology editing, import/export actions and Host diagnostics.
+     * The parent owns glossary state and Host operations; this view only
+     * forwards disclosure, draft and action events.
+     * @param props - glossary values, capabilities, callbacks and translator.
+     * @returns the progressive glossary disclosure.
+     */
+    function GlossaryPanel(props) {
+      const {
+        id,
+        open,
+        onToggle,
+        glossaryCount,
+        draft,
+        onDraftChange,
+        busy,
+        pending,
+        connected,
+        onApply,
+        onExport,
+        onImport,
+        message,
+        warnings,
+        t,
+      } = props
+      return h(
+        'section',
+        { className: 'dshTr-glossary', 'aria-labelledby': id },
+        h(
+          'details',
+          {
+            className: 'dshTr-glossaryDetails',
+            open,
+            onToggle,
+          },
+          h(
+            'summary',
+            { className: 'dshTr-glossarySummary' },
+            h(
+              'span',
+              { className: 'dshTr-glossaryHead' },
+              h(
+                'span',
+                { className: 'dshTr-glossaryTitle', id, role: 'heading', 'aria-level': 3 },
+                t('glossary.title'),
+              ),
+              h('span', { className: 'dshTr-glossaryCount' }, String(glossaryCount)),
+            ),
+          ),
+          h('p', { className: 'dshTr-note' }, t('glossary.note')),
+          h('textarea', {
+            className: 'dshTr-glossaryArea',
+            value: draft,
+            placeholder: t('glossary.placeholder'),
+            spellCheck: false,
+            'aria-label': t('glossary.title'),
+            onChange: onDraftChange,
+          }),
+          h(
+            'div',
+            { className: 'dshTr-glossaryActions' },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dshTr-button',
+                disabled: !connected || busy || pending || !draft.trim(),
+                onClick: onApply,
+              },
+              busy ? t('action.translating') : t('glossary.apply'),
+            ),
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dshTr-button dshTr-buttonGhost',
+                disabled: glossaryCount === 0,
+                onClick: onExport,
+              },
+              t('glossary.export'),
+            ),
+            h(
+              'label',
+              { className: 'dshTr-import' },
+              t('glossary.import'),
+              h('input', {
+                type: 'file',
+                accept: '.json,application/json',
+                onChange: onImport,
+              }),
+            ),
+          ),
+          message !== null
+            ? h('p', { className: 'dshTr-glossaryMessage', role: 'status' }, message)
+            : null,
+          warnings.length > 0
+            ? h(
+                'ul',
+                { className: 'dshTr-glossaryWarnings', role: 'status' },
+                ...warnings.map((warning, index) =>
+                  h('li', { key: warning.code + '-' + index },
+                    t('glossary.warning.' + warning.code),
+                  ),
+                ),
+              )
+            : null,
+        ),
+      )
+    }
+
+    /**
      * The translation workbench.
      * @param props - the slot props, carrying the bound translator.
      * @returns the workbench element.
@@ -1785,6 +1991,20 @@ window.__ModuleLoader__.load({
         }
       }, [cancel, format, pending, provider, run, source, sourceLanguage, targetLanguage])
 
+      const submitTranslation = React.useCallback(() => {
+        void run({ source, sourceLanguage, targetLanguage, provider, format })
+      }, [format, provider, run, source, sourceLanguage, targetLanguage])
+
+      const handleGlossaryToggle = React.useCallback((event) => {
+        setGlossaryOpen(event.currentTarget.open)
+      }, [setGlossaryOpen])
+
+      const handleGlossaryDraftChange = React.useCallback((event) => {
+        glossaryDraftDirtyRef.current = true
+        setGlossaryDraft(event.target.value)
+        setGlossaryMessage(null)
+      }, [setGlossaryDraft, setGlossaryMessage])
+
       // The status pill carries a short state label; the alert region carries
       // the full sentence, so the pill is never the only signal.
       const alertMessage = error !== null ? error : host.offline ? t('error.offline') : null
@@ -1901,160 +2121,44 @@ window.__ModuleLoader__.load({
               alertMessage,
             )
           : null,
-        h(
-          'div',
-          { className: 'dshTr-foot' },
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dshTr-button',
-              disabled: !canTranslate,
-              'aria-keyshortcuts': 'Control+Enter Meta+Enter',
-              // The hint and the live counter both explain the action: the
-              // counter is also where an over-limit refusal is stated.
-              'aria-describedby': `${ids.hint} ${ids.counter}`,
-              onClick: () => {
-                void run({ source, sourceLanguage, targetLanguage, provider, format })
-              },
-            },
-            pending ? t('action.translating') : error !== null ? t('action.retry') : t('action.translate'),
-          ),
-          pending
-            ? h(
-                'button',
-                {
-                  type: 'button',
-                  className: 'dshTr-button dshTr-buttonGhost',
-                  'aria-keyshortcuts': 'Escape',
-                  onClick: cancel,
-                },
-                t('action.cancel'),
-              )
-            : null,
-          h('span', { className: 'dshTr-hint', id: ids.hint }, t('hint.keyboard')),
-          h(
-            'span',
-            {
-              className: 'dshTr-counter',
-              id: ids.counter,
-              'data-over': overLimit ? 'true' : 'false',
-            },
-            host.limit === null
-              ? t('meta.limitPending')
-              : overLimit
-                ? t('meta.over', { count: source.length - host.limit })
-                : t('meta.count', { count: source.length, limit: host.limit }),
-          ),
-        ),
-        h(
-          'div',
-          { className: 'dshTr-meta' },
-          routeLabel !== null ? h('span', null, t('meta.route', { route: routeLabel })) : null,
-          h('span', null, t('meta.provider', { provider: servedLabel })),
-          result?.durationMs !== null && result?.durationMs !== undefined
-            ? h('span', null, t('meta.duration', { ms: result.durationMs }))
-            : null,
-          result !== null
-            ? h('span', null, result.cached ? t('meta.cached') : t('meta.fresh'))
-            : null,
-          detectedSource !== null
-            ? h('span', null, t('meta.detectedSource', { language: renderLanguage(
-                LANGUAGE_CATALOG.find((entry) => entry.id === detectedSource) ?? {
-                  id: detectedSource,
-                  label: detectedSource,
-                  zh: detectedSource,
-                },
-              ) }))
-            : null,
-        ),
-        h(
-          'section',
-          { className: 'dshTr-glossary', 'aria-labelledby': ids.glossary },
-          h(
-            'details',
-            {
-              className: 'dshTr-glossaryDetails',
-              open: glossaryOpen,
-              onToggle: (event) => setGlossaryOpen(event.currentTarget.open),
-            },
-            h(
-              'summary',
-              { className: 'dshTr-glossarySummary' },
-              h(
-                'span',
-                { className: 'dshTr-glossaryHead' },
-                h(
-                  'span',
-                  { className: 'dshTr-glossaryTitle', id: ids.glossary, role: 'heading', 'aria-level': 3 },
-                  t('glossary.title'),
-                ),
-                h('span', { className: 'dshTr-glossaryCount' }, String(host.glossary.length)),
-              ),
-            ),
-            h('p', { className: 'dshTr-note' }, t('glossary.note')),
-          h('textarea', {
-            className: 'dshTr-glossaryArea',
-            value: glossaryDraft,
-            placeholder: t('glossary.placeholder'),
-            spellCheck: false,
-            'aria-label': t('glossary.title'),
-            onChange: (event) => {
-              glossaryDraftDirtyRef.current = true
-              setGlossaryDraft(event.target.value)
-              setGlossaryMessage(null)
-            },
-          }),
-          h(
-            'div',
-            { className: 'dshTr-glossaryActions' },
-            h(
-              'button',
-              {
-                type: 'button',
-                className: 'dshTr-button',
-                disabled: !host.connected || glossaryBusy || pending || !glossaryDraft.trim(),
-                onClick: () => { void applyGlossary() },
-              },
-              glossaryBusy ? t('action.translating') : t('glossary.apply'),
-            ),
-            h(
-              'button',
-              {
-                type: 'button',
-                className: 'dshTr-button dshTr-buttonGhost',
-                disabled: host.glossary.length === 0,
-                onClick: () => { void exportGlossary() },
-              },
-              t('glossary.export'),
-            ),
-            h(
-              'label',
-              { className: 'dshTr-import' },
-              t('glossary.import'),
-              h('input', {
-                type: 'file',
-                accept: '.json,application/json',
-                onChange: (event) => { void importGlossaryFile(event) },
-              }),
-            ),
-          ),
-          glossaryMessage !== null
-            ? h('p', { className: 'dshTr-glossaryMessage', role: 'status' }, glossaryMessage)
-            : null,
-          host.glossaryWarnings.length > 0
-            ? h(
-                'ul',
-                { className: 'dshTr-glossaryWarnings', role: 'status' },
-                ...host.glossaryWarnings.map((warning, index) =>
-                  h('li', { key: warning.code + '-' + index },
-                    t('glossary.warning.' + warning.code),
-                  ),
-                ),
-              )
-            : null,
-          ),
-        ),
+        h(TranslationFooter, {
+          ids,
+          canTranslate,
+          pending,
+          error,
+          sourceLength: source.length,
+          limit: host.limit,
+          overLimit,
+          onTranslate: submitTranslation,
+          onCancel: cancel,
+          t,
+        }),
+        h(TranslationMetadata, {
+          routeLabel,
+          servedLabel,
+          result,
+          detectedSource,
+          renderLanguage,
+          t,
+        }),
+        h(GlossaryPanel, {
+          id: ids.glossary,
+          open: glossaryOpen,
+          onToggle: handleGlossaryToggle,
+          glossaryCount: host.glossary.length,
+          draft: glossaryDraft,
+          onDraftChange: handleGlossaryDraftChange,
+          busy: glossaryBusy,
+          pending,
+          connected: host.connected,
+          onApply: () => { void applyGlossary() },
+          onExport: () => { void exportGlossary() },
+          onImport: (event) => { void importGlossaryFile(event) },
+          message: glossaryMessage,
+          warnings: host.glossaryWarnings,
+          t,
+        }),
+
       )
     }
 

@@ -1557,3 +1557,70 @@ test('source editor shortcuts submit and cancel through parent-owned request sta
   assert.equal(requestSignal.aborted, true, 'Escape must abort the in-flight request')
   mounted.unmount()
 })
+
+test('the extracted footer and metadata retain accessible request context', async () => {
+  loadPluginState = await loadPlugin()
+  const { mounted } = mountPanel()
+  await flushPanel()
+
+  const footer = findOne(
+    mounted.tree,
+    (node) => node.props?.className === 'dshTr-foot',
+    'the translation footer',
+  )
+  const action = findOne(
+    footer,
+    (node) => node.type === 'button' && String(node.props?.className).split(' ').includes('dshTr-button') && !String(node.props?.className).includes('buttonGhost'),
+    'the primary translation action',
+  )
+  const hint = findOne(footer, (node) => String(node.props?.className).includes('dshTr-hint'), 'the shortcut hint')
+  const counter = findOne(footer, (node) => String(node.props?.className).includes('dshTr-counter'), 'the character counter')
+  assert.equal(action.props['aria-keyshortcuts'], 'Control+Enter Meta+Enter')
+  assert.deepEqual(String(action.props['aria-describedby']).split(' '), [hint.props.id, counter.props.id])
+  assert.match(textOf(counter), /0 \/ 20000/)
+
+  const metadata = findOne(
+    mounted.tree,
+    (node) => node.props?.className === 'dshTr-meta',
+    'the translation metadata',
+  )
+  assert.match(textOf(metadata), /Route: Direct endpoint/)
+  assert.match(textOf(metadata), /Service: Bing/)
+  mounted.unmount()
+})
+
+test('the extracted glossary view forwards draft edits and Host action state', async () => {
+  loadPluginState = await loadPlugin()
+  const { mounted } = mountPanel()
+  await flushPanel()
+
+  const panel = findOne(
+    mounted.tree,
+    (node) => node.props?.className === 'dshTr-glossary',
+    'the glossary panel',
+  )
+  const details = findOne(panel, (node) => node.type === 'details', 'the glossary disclosure')
+  assert.equal(details.props.open, false)
+
+  const editor = findOne(
+    panel,
+    (node) => node.type === 'textarea' && node.props?.className === 'dshTr-glossaryArea',
+    'the glossary editor',
+  )
+  editor.props.onChange({ target: { value: '{"version":1,"glossary":[]}' } })
+  await flushPanel()
+
+  const updatedEditor = findOne(
+    mounted.tree,
+    (node) => node.type === 'textarea' && node.props?.className === 'dshTr-glossaryArea',
+    'the updated glossary editor',
+  )
+  assert.equal(updatedEditor.props.value, '{"version":1,"glossary":[]}')
+  const apply = findOne(
+    panel,
+    (node) => node.type === 'button' && textOf(node) === 'Apply glossary',
+    'the Apply glossary action',
+  )
+  assert.equal(apply.props.disabled, true, 'the Host must remain the authority on glossary actions')
+  mounted.unmount()
+})
