@@ -559,11 +559,18 @@ window.__ModuleLoader__.load({
         if (typeof entry.source !== 'string' || typeof entry.target !== 'string') return []
         const source = entry.source.trim()
         const target = entry.target.trim()
+        const hasControlCharacters = (value) => {
+          for (let index = 0; index < value.length; index += 1) {
+            const code = value.charCodeAt(index)
+            if (code <= 0x1f || code === 0x7f) return true
+          }
+          return false
+        }
         if (
           source.length === 0 ||
           target.length === 0 ||
-          /[\\u0000-\\u001F\\u007F]/u.test(source) ||
-          /[\\u0000-\\u001F\\u007F]/u.test(target)
+          hasControlCharacters(source) ||
+          hasControlCharacters(target)
         ) return []
 
         const normalized = { source, target }

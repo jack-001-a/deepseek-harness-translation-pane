@@ -1420,7 +1420,7 @@ test('malformed Host glossary rows are ignored without marking the Host offline'
         null,
         'not-an-entry',
         { source: '', target: 'empty source' },
-        { source: 'control\\u0000term', target: 'unsafe source' },
+        { source: 'control' + String.fromCharCode(0) + 'term', target: 'unsafe source' },
         {
           source: ' API ',
           target: ' 接口 ',
