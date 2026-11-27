@@ -902,6 +902,97 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * Own the glossary editor draft and its Host import/export actions.
+     *
+     * The Host remains authoritative: applying a draft validates it, reports
+     * warnings and updates the active glossary before the editor is reset.
+     * @param options - Host state, lifecycle guard and translation reset action.
+     * @returns glossary editor state and event handlers.
+     */
+    function useGlossaryEditor(options) {
+      const { host, setHost, mountedRef, resetTranslation } = options
+      const [glossaryBusy, setGlossaryBusy] = React.useState(false)
+      const [glossaryMessage, setGlossaryMessage] = React.useState(null)
+      const [glossaryOpen, setGlossaryOpen] = React.useState(false)
+      const { glossaryDraft, setGlossaryDraft, glossaryDraftDirtyRef } = options
+
+      const applyGlossary = React.useCallback(async () => {
+        if (!mountedRef.current || !host.connected || glossaryBusy) return
+        setGlossaryBusy(true)
+        setGlossaryMessage(null)
+        try {
+          const value = await callHost(ctx, 'setGlossary', { payload: glossaryDraft })
+          if (!mountedRef.current) return
+          const nextGlossary = Array.isArray(value?.glossary) ? value.glossary : []
+          const warnings = Array.isArray(value?.warnings) ? value.warnings : []
+          glossaryDraftDirtyRef.current = false
+          setGlossaryDraft(glossaryJson(nextGlossary))
+          setHost((previous) => ({
+            ...previous,
+            glossary: nextGlossary,
+            glossaryWarnings: warnings,
+          }))
+          resetTranslation()
+          setGlossaryMessage(
+            warnings.length > 0
+              ? t('glossary.warningCount', { count: warnings.length })
+              : t('glossary.applied', { count: nextGlossary.length }),
+          )
+        } catch (failure) {
+          if (mountedRef.current) {
+            setGlossaryMessage(diagnosticFor(failure) || t('error.generic'))
+          }
+        } finally {
+          if (mountedRef.current) setGlossaryBusy(false)
+        }
+      }, [glossaryBusy, glossaryDraft, host.connected, mountedRef, resetTranslation, setHost])
+
+      const exportGlossary = React.useCallback(async () => {
+        if (!mountedRef.current) return
+        const copied = await copyText(glossaryJson(host.glossary))
+        if (!mountedRef.current) return
+        setGlossaryMessage(copied ? t('glossary.exported') : t('error.copyFailed'))
+      }, [host.glossary, mountedRef])
+
+      const importGlossaryFile = React.useCallback(async (event) => {
+        if (!mountedRef.current) return
+        const file = event.target.files?.[0]
+        if (!file) {
+          event.target.value = ''
+          return
+        }
+        event.target.value = ''
+        if (file.size > 256 * 1024 || typeof file.text !== 'function') {
+          setGlossaryMessage(t('glossary.invalidFile'))
+          return
+        }
+        try {
+          const contents = await file.text()
+          if (!mountedRef.current) return
+          setGlossaryDraft(contents)
+          glossaryDraftDirtyRef.current = true
+          setGlossaryMessage(null)
+        } catch {
+          if (mountedRef.current) setGlossaryMessage(t('glossary.invalidFile'))
+        }
+      }, [mountedRef])
+
+      return {
+        glossaryDraft,
+        setGlossaryDraft,
+        glossaryBusy,
+        glossaryMessage,
+        setGlossaryMessage,
+        glossaryOpen,
+        setGlossaryOpen,
+        glossaryDraftDirtyRef,
+        applyGlossary,
+        exportGlossary,
+        importGlossaryFile,
+      }
+    }
+
+    /**
      * The translation workbench.
      * @param props - the slot props, carrying the bound translator.
      * @returns the workbench element.
@@ -967,12 +1058,35 @@ window.__ModuleLoader__.load({
       const [copied, setCopied] = React.useState(false)
       const [status, setStatus] = React.useState('idle')
       const [result, setResult] = React.useState(null)
-      const [glossaryDraft, setGlossaryDraft] = React.useState('')
-      const [glossaryBusy, setGlossaryBusy] = React.useState(false)
-      const [glossaryMessage, setGlossaryMessage] = React.useState(null)
-      const [glossaryOpen, setGlossaryOpen] = React.useState(false)
       const glossaryDraftDirtyRef = React.useRef(false)
+      const [glossaryDraft, setGlossaryDraft] = React.useState('')
       const { host, setHost, describeHost, mountedRef } = useHostConnection({
+        setGlossaryDraft,
+        glossaryDraftDirtyRef,
+      })
+      const resetTranslation = React.useCallback(() => {
+        setOutput('')
+        setResult(null)
+        setCopied(false)
+        setError(null)
+        setErrorTitle(null)
+        setStatus('idle')
+      }, [])
+      const {
+        glossaryBusy,
+        glossaryMessage,
+        setGlossaryMessage,
+        glossaryOpen,
+        setGlossaryOpen,
+        applyGlossary,
+        exportGlossary,
+        importGlossaryFile,
+      } = useGlossaryEditor({
+        host,
+        setHost,
+        mountedRef,
+        resetTranslation,
+        glossaryDraft,
         setGlossaryDraft,
         glossaryDraftDirtyRef,
       })
@@ -1015,88 +1129,6 @@ window.__ModuleLoader__.load({
         },
         [],
       )
-
-      /**
-       * Apply an imported glossary to the live Host. The Host validates the
-       * JSON, reports overlaps and invalidates caches before confirming success.
-       * @returns nothing.
-       */
-      const applyGlossary = React.useCallback(async () => {
-        if (!mountedRef.current || !host.connected || glossaryBusy) return
-        setGlossaryBusy(true)
-        setGlossaryMessage(null)
-        try {
-          const value = await callHost(ctx, 'setGlossary', { payload: glossaryDraft })
-          if (!mountedRef.current) return
-          const nextGlossary = Array.isArray(value?.glossary) ? value.glossary : []
-          const warnings = Array.isArray(value?.warnings) ? value.warnings : []
-          glossaryDraftDirtyRef.current = false
-          setGlossaryDraft(glossaryJson(nextGlossary))
-          setHost((previous) => ({
-            ...previous,
-            glossary: nextGlossary,
-            glossaryWarnings: warnings,
-          }))
-          // The visible answer used the previous glossary; do not leave it
-          // looking like a result produced with the newly active terms.
-          setOutput('')
-          setResult(null)
-          setCopied(false)
-          setError(null)
-          setErrorTitle(null)
-          setStatus('idle')
-          setGlossaryMessage(
-            warnings.length > 0
-              ? t('glossary.warningCount', { count: warnings.length })
-              : t('glossary.applied', { count: nextGlossary.length }),
-          )
-        } catch (failure) {
-          if (mountedRef.current) {
-            setGlossaryMessage(diagnosticFor(failure) || t('error.generic'))
-          }
-        } finally {
-          if (mountedRef.current) setGlossaryBusy(false)
-        }
-      }, [glossaryBusy, glossaryDraft, host.connected, t])
-
-      /**
-       * Copy the active glossary in the portable versioned JSON format.
-       * @returns nothing.
-       */
-      const exportGlossary = React.useCallback(async () => {
-        if (!mountedRef.current) return
-        const copied = await copyText(glossaryJson(host.glossary))
-        if (!mountedRef.current) return
-        setGlossaryMessage(copied ? t('glossary.exported') : t('error.copyFailed'))
-      }, [host.glossary, t])
-
-      /**
-       * Read an uploaded glossary JSON file into the import editor.
-       * @param event - the file input change event.
-       * @returns resolution after the file has been read.
-       */
-      const importGlossaryFile = React.useCallback(async (event) => {
-        if (!mountedRef.current) return
-        const file = event.target.files?.[0]
-        if (!file) {
-          event.target.value = ''
-          return
-        }
-        event.target.value = ''
-        if (file.size > 256 * 1024 || typeof file.text !== 'function') {
-          setGlossaryMessage(t('glossary.invalidFile'))
-          return
-        }
-        try {
-          const contents = await file.text()
-          if (!mountedRef.current) return
-          setGlossaryDraft(contents)
-          glossaryDraftDirtyRef.current = true
-          setGlossaryMessage(null)
-        } catch {
-          if (mountedRef.current) setGlossaryMessage(t('glossary.invalidFile'))
-        }
-      }, [t])
 
       const sourceOptions = React.useMemo(
         () => withValue(languageOptions(host.languages, true), sourceLanguage),

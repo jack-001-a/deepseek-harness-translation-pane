@@ -8,6 +8,7 @@ and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- Extract glossary draft state, import/export, Host apply and post-apply result invalidation into a focused `useGlossaryEditor` hook.
 - Extract Host metadata, reconnect subscriptions, retry cancellation and stale-response protection into a focused `useHostConnection` hook.
 - Remove an unused workbench CSS class and add a regression check for orphaned component styles.
 - Move HTTP retry-hint parsing and bounded FIFO scheduling into focused Host modules, keeping the plugin's runtime API unchanged.
